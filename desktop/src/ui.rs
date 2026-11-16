@@ -25,7 +25,7 @@ pub fn run(dir: PathBuf, commands: WindowCommands) -> eframe::Result<()> {
     };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([376.0, 650.0])
+            .with_inner_size([376.0, 654.0])
             .with_min_inner_size([340.0, 460.0])
             .with_icon(icon.clone()),
         vsync: true,

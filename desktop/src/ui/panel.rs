@@ -15,13 +15,13 @@ use std::time::Duration;
 impl Desktop {
     pub(super) fn panel(&self, ui: &mut Ui, language: Language) {
         self.hero(ui, language);
-        ui.add_space(12.0);
+        ui.add_space(11.0);
         self.metrics(ui, language);
         ui.add_space(11.0);
         self.settings(ui, language);
 
         if let (Some(http), Some(socks)) = (self.state.tunnel.http, self.state.tunnel.socks) {
-            ui.add_space(9.0);
+            ui.add_space(8.0);
             ui.vertical_centered(|ui| {
                 ui.label(regular(
                     format!("HTTP {http}  ·  SOCKS {socks}"),
@@ -122,7 +122,7 @@ impl Desktop {
             );
         });
 
-        ui.add_space(13.0);
+        ui.add_space(12.0);
         let running = !matches!(phase, Phase::Off | Phase::Failed);
         let response = ui
             .scope(|ui| {
@@ -312,6 +312,7 @@ impl Desktop {
             setting_row(
                 ui,
                 language.text("Country", "Страна"),
+                None,
                 |ui| {
                     let (response, option) = self.country_choice(
                         ui,
@@ -335,6 +336,7 @@ impl Desktop {
                 setting_row(
                     ui,
                     service.label(),
+                    None,
                     |ui| {
                         let current = self.state.settings.countries.get(service);
                         let (response, option) = self.country_choice(
@@ -359,17 +361,12 @@ impl Desktop {
             setting_row(
                 ui,
                 language.text("System proxy", "Системный прокси"),
+                Some(language.text(
+                    "For apps using Windows proxy settings",
+                    "Для приложений с прокси Windows",
+                )),
                 |ui| self.system_proxy(ui, language),
-                |ui| {
-                    ui.label(regular(
-                        language.text(
-                            "For apps using Windows proxy settings",
-                            "Для приложений с прокси Windows",
-                        ),
-                        11.0,
-                        MUTED,
-                    ));
-                },
+                |_| {},
             );
         });
     }
@@ -524,14 +521,23 @@ fn tile(ui: &mut Ui, width: f32, title: &str, body: impl FnOnce(&mut Ui)) {
 fn setting_row(
     ui: &mut Ui,
     title: &str,
+    subtitle: Option<&str>,
     control: impl FnOnce(&mut Ui) -> Response,
     detail: impl FnOnce(&mut Ui),
 ) {
     Frame::new()
-        .inner_margin(Margin::symmetric(11, 6))
+        .inner_margin(Margin::symmetric(11, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                let label = ui.label(semibold(title, 13.0, TEXT));
+                let label = ui
+                    .vertical(|ui| {
+                        let label = ui.label(semibold(title, 13.0, TEXT));
+                        if let Some(subtitle) = subtitle {
+                            ui.label(regular(subtitle, 11.0, MUTED));
+                        }
+                        label
+                    })
+                    .inner;
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     control(ui).labelled_by(label.id)
                 });
