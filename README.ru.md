@@ -1,10 +1,10 @@
 # PsiMole
 
-[English](README.md) · [Windows](desktop/README.md) · [Демо](README.md#see-it-in-action) · [Поставить звезду](https://github.com/lilter96/PsiMole)
+[English](README.md) · [Скачать](https://github.com/lilter96/PsiMole/releases/latest) · [Демо](README.md#see-it-in-action) · [Поставить звезду](https://github.com/lilter96/PsiMole)
 
-PsiMole — расширение GNOME Shell для Psiphon на Linux. Крот в каске живёт
-в верхней панели, роет туннель при подключении и зажигает фонарь, когда
-туннель открыт.
+PsiMole запускает Psiphon из панели GNOME на Linux и из отдельного приложения
+на Windows. Крот в каске роет туннель при подключении и зажигает фонарь,
+когда туннель открыт.
 
 - Выбирай страну выхода и смотри время работы, задержку и скорость.
 - Переключай системный прокси GNOME для приложений, которые его поддерживают.
@@ -18,13 +18,22 @@ PsiMole — расширение GNOME Shell для Psiphon на Linux. Крот
 
 ## Установка
 
-Нужны Linux с GNOME Shell 46–51, Git и `curl` или `wget`. Установщик
+### Windows x64
+
+Запусти установщик и открой **PsiMole** из меню «Пуск». Закрытие окна
+сворачивает PsiMole в трей. [Скачать установщик](https://github.com/lilter96/PsiMole/releases/latest/download/PsiMole-Setup-x64.exe) · [Руководство для Windows](desktop/README.md)
+
+### Ubuntu x86_64 с GNOME
+
+Нужны GNOME Shell 46–51 и `curl` или `wget`. Установщик
 скачивает консольный Psiphon для x86_64 и запускается без `sudo`. Если Psiphon
 уже установлен в `~/psiphon`, установщик использует его и сохраняет настройки.
 
+Скачай архив и выполни команды в папке с загрузкой. [Скачать для Ubuntu](https://github.com/lilter96/PsiMole/releases/latest/download/PsiMole-Ubuntu-x64.tar.gz)
+
 ```sh
-git clone https://github.com/lilter96/PsiMole.git
-cd PsiMole
+tar -xzf PsiMole-Ubuntu-x64.tar.gz
+cd PsiMole-Ubuntu-x64
 ./install.sh --lang ru
 ```
 

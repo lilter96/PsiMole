@@ -4,6 +4,7 @@ PsiMole runs as a Rust desktop app on Windows x64. Run `PsiMole-Setup-x64.exe`
 and open **PsiMole** from the Start menu. Setup installs for your Windows user
 and needs no administrator access. The first connection downloads the official
 Psiphon engine and its configuration and checks their SHA-256 digests.
+[Download PsiMole for Windows](https://github.com/lilter96/PsiMole/releases/latest/download/PsiMole-Setup-x64.exe)
 
 Choose an exit country and click **Connect**. Turn on **System proxy** to route
 apps that follow your Windows proxy setting. For a manual browser setup, use
@@ -32,8 +33,8 @@ In that profile's **Network Settings**, enter the service's address in **Manual
 proxy configuration**, use the same proxy for HTTPS, and keep its domains out of
 the **No proxy for** list.
 
-One tunnel serves both locks. Choose the same explicit country under **Exit
-country** as the lock you want to use. A service can connect after Psiphon
+One tunnel serves both locks. Choose the same explicit country under **Country**
+as the lock you want to use. A service can connect after Psiphon
 reports that country and two sources confirm the exit IP's country. A disconnect,
 reconnect, or route change closes protected TCP streams. Verification runs on
 route changes and when a lock is first enabled.
@@ -47,7 +48,7 @@ has a separate Linux firewall and DNS setup.
 
 ## Speed
 
-Click **Measure speed** while connected to measure aggregate throughput over
+Click **Measure** under **VPN speed** while connected to measure aggregate throughput over
 four HTTPS connections to Cloudflare through the regular Psiphon proxy. The
 test starts with 4 MB and sends another 32 MB on faster connections in each
 direction. Compare results across several runs on the same
