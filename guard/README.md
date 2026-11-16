@@ -46,11 +46,11 @@ uses locally resolved names, Anthropic's published inbound IP blocks, and
 the hostname in HTTP or TLS to recognize requests with cached or alternate DNS,
 including the [standard and alternate CDN web ports](https://developers.cloudflare.com/fundamentals/reference/network-ports/).
 Actual HTTP and TLS connections are inspected by their headers. Opaque
-connections and encrypted hellos to the configured shared CDN networks need a
-verified exit. On other networks, a visible name in an encrypted hello must
-resolve to the peer before the guard allows a direct connection. Other TCP
-protocols can connect directly to ordinary addresses. UDP to the covered HTTPS
-ports is rejected for the protected account.
+connections to the configured shared CDN networks and TLS connections with
+an obscured destination need a verified exit. A visible TLS name can go
+directly when it identifies the original peer through DNS. Other TCP protocols
+can connect directly to ordinary addresses. UDP to the covered HTTPS ports is
+rejected for the protected account.
 Separate containers, remote tunnels, arbitrary third-party gateways and direct
 traffic outside these ports to shared addresses require their own routing policy.
 

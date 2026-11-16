@@ -188,20 +188,19 @@ impl Proxy {
                 let numeric_name = announced_target.ip().is_some();
                 let name = announced_target.host;
                 let named = self.protected(&name);
-                // ECH can advertise an unrelated outer name. For an explicit
-                // proxy request carrying the same DNS name, that name is also
-                // available independently of TLS (including ECH GREASE).
+                // Real ECH can advertise a shared public name; GREASE uses
+                // the ordinary name. Confirm the visible name independently
+                // through the proxy request or the original peer's DNS.
                 let shared_name =
                     matches!(name.as_str(), "cloudflare-ech.com" | "cloudflare-ech.net");
                 let hidden = !named
                     && !numeric_name
                     && announced.ech
                     && (shared_name
-                        || if proxy {
-                            target.ip().is_some() || target.host != name
+                        || if target.ip().is_some() {
+                            !name_matches_peer(&target, &name).await
                         } else {
-                            target.ip().is_some_and(web::shared_web_edge)
-                                || !name_matches_peer(&target, &name).await
+                            target.host != name
                         });
                 austria = named || numeric_name || hidden;
                 if target.synthetic() {

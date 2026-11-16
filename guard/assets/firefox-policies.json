@@ -12,10 +12,6 @@
       "network.proxy.no_proxies_on": {
         "Value": "",
         "Status": "locked"
-      },
-      "security.tls.ech.grease_probability": {
-        "Value": 0,
-        "Status": "locked"
       }
     },
     "DisableEncryptedClientHello": true,
