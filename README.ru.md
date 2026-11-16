@@ -1,6 +1,6 @@
 # PsiMole
 
-[English](README.md) · [Демо](README.md#see-it-in-action) · [Поставить звезду](https://github.com/lilter96/PsiMole)
+[English](README.md) · [Windows](desktop/README.md) · [Демо](README.md#see-it-in-action) · [Поставить звезду](https://github.com/lilter96/PsiMole)
 
 PsiMole — расширение GNOME Shell для Psiphon на Linux. Крот в каске живёт
 в верхней панели, роет туннель при подключении и зажигает фонарь, когда

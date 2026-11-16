@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="#quick-start">Install</a> ·
+  <a href="desktop/README.md">Windows</a> ·
   <a href="#see-it-in-action">Demo</a> ·
   <a href="#country-protection-for-claude">Claude country lock</a> ·
   <a href="README.ru.md">Русский</a> ·

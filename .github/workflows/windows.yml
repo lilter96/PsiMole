@@ -1,0 +1,109 @@
+name: Windows desktop
+
+on:
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/windows.yml', 'docs/media/psimole.png', 'guard/assets/domains.txt', 'LICENSE']
+  push:
+    branches: [main]
+    paths: ['desktop/**', '.github/workflows/windows.yml', 'docs/media/psimole.png', 'guard/assets/domains.txt', 'LICENSE']
+  workflow_dispatch:
+    inputs:
+      live_tunnel:
+        description: Exercise a live Austrian tunnel and measure throughput
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo fmt -- --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  installer:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+      - name: Restore Cargo build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            desktop/target
+          key: windows-x64-${{ hashFiles('desktop/Cargo.lock') }}
+          restore-keys: windows-x64-
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - name: Check crash recovery of the Windows proxy
+        run: cargo test --locked windows_proxy_recovery_after_crash -- --ignored
+      - name: Download Psiphon, establish an Austrian tunnel and measure throughput
+        if: inputs.live_tunnel
+        run: cargo test --locked live_austrian_tunnel -- --ignored --nocapture
+      - run: cargo build --locked --release
+      - name: Build setup
+        run: |
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (!(Test-Path $nsis)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed" }
+          }
+          & $nsis /V2 installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "NSIS build failed" }
+      - name: Install, hide, reopen and uninstall
+        run: |
+          function Wait-For([scriptblock] $Check, [string] $Failure) {
+            for ($i = 0; $i -lt 60; $i++) {
+              if (& $Check) { return }
+              Start-Sleep -Milliseconds 500
+            }
+            throw $Failure
+          }
+
+          $setup = Start-Process -FilePath '.\PsiMole-Setup-x64.exe' -ArgumentList '/S' -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw "Setup exited with $($setup.ExitCode)" }
+          $install = Join-Path $env:LOCALAPPDATA 'Programs\PsiMole'
+          $exe = Join-Path $install 'PsiMole.exe'
+          if (!(Test-Path $exe)) { throw 'Installed executable missing' }
+          $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'PsiMole.lnk'
+          if (!(Test-Path $shortcut)) { throw 'Start menu shortcut missing' }
+
+          $app = Start-Process -FilePath $exe -PassThru
+          Wait-For { $app.Refresh(); !$app.HasExited -and $app.MainWindowHandle -ne 0 } 'Window failed to open'
+          if (!$app.CloseMainWindow()) { throw 'Could not send close request' }
+          Wait-For { $app.Refresh(); !$app.HasExited -and $app.MainWindowHandle -eq 0 } 'Window did not hide to the tray'
+          $second = Start-Process -FilePath $exe -PassThru -Wait
+          if ($second.ExitCode -ne 0) { throw 'Second launch failed' }
+          Wait-For { $app.Refresh(); !$app.HasExited -and $app.MainWindowHandle -ne 0 } 'Second launch did not restore the same window'
+          $quit = Start-Process -FilePath $exe -ArgumentList '--quit-if-running' -PassThru -Wait
+          if ($quit.ExitCode -ne 0 -or !$app.WaitForExit(10000)) { throw 'Quit did not stop the app' }
+
+          $remove = Start-Process -FilePath (Join-Path $install 'Uninstall.exe') -ArgumentList '/S' -PassThru -Wait
+          if ($remove.ExitCode -ne 0) { throw "Uninstall exited with $($remove.ExitCode)" }
+          Wait-For { !(Test-Path $exe) -and !(Test-Path $shortcut) } 'Uninstall did not remove app and shortcut'
+      - name: Write setup checksum
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 .\PsiMole-Setup-x64.exe).Hash.ToLowerInvariant()
+          "$hash  PsiMole-Setup-x64.exe" | Set-Content -Encoding ascii .\PsiMole-Setup-x64.exe.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PsiMole-Windows-x64
+          path: |
+            desktop/PsiMole-Setup-x64.exe
+            desktop/PsiMole-Setup-x64.exe.sha256
+          if-no-files-found: error
