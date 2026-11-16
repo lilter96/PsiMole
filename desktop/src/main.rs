@@ -5,8 +5,6 @@ mod platform;
 #[cfg(windows)]
 mod runtime;
 #[cfg(windows)]
-mod speed;
-#[cfg(windows)]
 mod ui;
 
 #[cfg(windows)]
@@ -63,6 +61,46 @@ fn main() -> std::process::ExitCode {
 }
 
 #[cfg(not(windows))]
-fn main() {
-    eprintln!("Use the PsiMole GNOME extension on Linux.");
+fn main() -> std::process::ExitCode {
+    use psimole::speed::{Route, measure};
+    use std::num::NonZeroU16;
+    use std::process::ExitCode;
+
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let route = match args.as_slice() {
+        [command] if command == "--measure-speed" => Route::Proxy(NonZeroU16::new(8081).unwrap()),
+        [command, route] if command == "--measure-speed" => {
+            if route == "direct" {
+                Route::Direct
+            } else if let Ok(port) = route.parse() {
+                Route::Proxy(port)
+            } else {
+                eprintln!("Use a valid loopback HTTP proxy port or 'direct'.");
+                return ExitCode::FAILURE;
+            }
+        }
+        _ => {
+            eprintln!(
+                "Use the PsiMole GNOME extension on Linux. Run psimole --measure-speed [PORT|direct] to measure a connection."
+            );
+            return if args.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            };
+        }
+    };
+    match measure(route, || true) {
+        Ok(result) => {
+            println!(
+                "{:.2} Mbps down, {:.2} Mbps up",
+                result.down_mbps, result.up_mbps
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("Speed test failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }

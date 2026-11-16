@@ -47,10 +47,17 @@ has a separate Linux firewall and DNS setup.
 
 ## Speed
 
-Click **Measure speed** while connected to send 8 MB in each direction through
-the regular Psiphon proxy and time both transfers. Compare results across several
-runs on the same network and exit country. The selected Psiphon server, the
-network route, and Psiphon's traffic limits affect the measured throughput.
+Click **Measure speed** while connected to measure aggregate throughput over
+four HTTPS connections to Cloudflare through the regular Psiphon proxy. Each
+direction transfers 32 MB. Compare results across several runs on the same
+network and exit country. The selected Psiphon server, the network route, and
+Psiphon's traffic limits affect the measured throughput.
+
+To run the same benchmark from this directory on Linux with Rust installed,
+use `cargo run --locked --release -- --measure-speed` for the default local
+HTTP proxy on port 8081. Append a different port for a custom Psiphon instance
+or `direct` for a direct baseline.
+
 The Windows client requests a 2 MiB SSH channel window to improve throughput
 on high-delay links. Psiphon still chooses the server and transport for the
 selected country.

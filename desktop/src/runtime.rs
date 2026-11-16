@@ -1,7 +1,7 @@
 use crate::platform::{EngineJob, SystemProxy, attach_job, read_json, write_json};
-use crate::speed::{self, Speed};
 use eframe::egui;
 use psimole::guard::{self, Gate, Revision};
+use psimole::speed::{self, Route, Speed};
 use psimole::tunnel::{Notice, REGIONS, Service, Settings, Tunnel, db_ip_country, parse_trace};
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
+use std::num::NonZeroU16;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -437,9 +438,11 @@ impl Runtime {
     }
 
     fn measure(&mut self) {
-        let (Some(run), Some(revision), Some(port)) =
-            (self.run, self.revision, self.status.tunnel.http)
-        else {
+        let (Some(run), Some(revision), Some(port)) = (
+            self.run,
+            self.revision,
+            self.status.tunnel.http.and_then(NonZeroU16::new),
+        ) else {
             return;
         };
         if self.status.phase != Phase::Connected
@@ -452,7 +455,8 @@ impl Runtime {
         let events = self.events.clone();
         let gate = Arc::clone(&self.gate);
         thread::spawn(move || {
-            let result = speed::measure(port, || gate.revision(run) == Some(revision));
+            let result =
+                speed::measure(Route::Proxy(port), || gate.revision(run) == Some(revision));
             let _ = events.send(Event::Measured(run, revision, result));
         });
     }
@@ -759,7 +763,8 @@ mod tests {
             verify_country(&proof, &gate),
             "The exit did not pass both geographic checks"
         );
-        let data = speed::measure(http, || gate.revision(run) == Some(proof.revision)).unwrap();
+        let route = Route::Proxy(NonZeroU16::new(http).unwrap());
+        let data = speed::measure(route, || gate.revision(run) == Some(proof.revision)).unwrap();
         assert_eq!(gate.revision(run), Some(proof.revision));
         println!(
             "Austrian tunnel: {:.2} Mbps down, {:.2} Mbps up",

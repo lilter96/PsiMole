@@ -324,8 +324,8 @@ impl Desktop {
                 if ui
                     .add_enabled(!running, egui::Button::new(label))
                     .on_hover_text(language.text(
-                        "Transfers 8 MB in each direction through this tunnel.",
-                        "Передаёт по 8 МБ в каждую сторону через текущий туннель.",
+                        "Transfers 32 MB in each direction through this tunnel using four connections.",
+                        "Передаёт по 32 МБ в каждую сторону через текущий туннель на четырёх соединениях.",
                     ))
                     .clicked()
                 {
