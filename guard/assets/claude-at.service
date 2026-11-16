@@ -1,5 +1,7 @@
 [Unit]
 Description=Psiphon country protection for Claude
+Requires=claude-at-firewall.service
+After=claude-at-firewall.service
 StartLimitIntervalSec=0
 
 [Service]

@@ -3,13 +3,19 @@
     "Proxy": {
       "Mode": "manual",
       "Locked": true,
-      "SOCKSProxy": "127.0.0.1:@SOCKS@",
+      "SOCKSProxy": "127.0.0.1:11081",
       "SOCKSVersion": 5,
       "UseProxyForDNS": true
     },
     "DNSOverHTTPS": {
       "Enabled": false,
       "Locked": true
+    },
+    "Preferences": {
+      "network.proxy.failover_direct": {
+        "Value": false,
+        "Status": "locked"
+      }
     },
     "DisableEncryptedClientHello": true,
     "IPProtectionAvailable": false

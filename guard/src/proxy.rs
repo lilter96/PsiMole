@@ -1,4 +1,5 @@
 use crate::gate::{Gate, Permit};
+use crate::web;
 use bytes::Bytes;
 use http::uri::Authority;
 use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
@@ -127,6 +128,10 @@ impl Proxy {
         self.protected(&target.host)
     }
 
+    fn proxy_requires_country(&self, target: &Target) -> bool {
+        self.protected_target(target) || (!web::is_web_port(target.port) && target.ip().is_some())
+    }
+
     async fn dial(
         &self,
         target: &Target,
@@ -169,20 +174,33 @@ impl Proxy {
     ) -> io::Result<()> {
         let mut austria = self.protected_target(&target);
         let mut prefix = Vec::new();
-        if !austria && matches!(target.port, 80 | 443) {
-            let name = timeout(
-                HELLO_TIMEOUT,
-                request_host(&mut client, target.port, &mut prefix),
-            )
-            .await??;
-            if let Some(name) = name {
-                austria = self.protected(&name);
+        if !austria && web::is_web_port(target.port) {
+            let name = timeout(HELLO_TIMEOUT, request_host(&mut client, &mut prefix)).await??;
+            if let Some(announced) = name {
+                let announced_target = Target::new(&announced.name, target.port)?;
+                let numeric_name = announced_target.ip().is_some();
+                let name = announced_target.host;
+                let named = self.protected(&name);
+                // ECH can advertise an unrelated outer name. For an explicit
+                // proxy request carrying the same DNS name, that name is also
+                // available independently of TLS (including ECH GREASE).
+                let hidden = announced.ech
+                    && (!proxy
+                        || target.ip().is_some()
+                        || target.host != name
+                        || name == "cloudflare-ech.com"
+                        || name == "cloudflare-ech.net");
+                austria = named || hidden || numeric_name;
                 if target.synthetic() {
-                    if !austria {
+                    if !named {
                         return Err(blocked());
                     }
                     target = Target::new(&name, target.port)?;
                 }
+            } else {
+                // An IP with no credible hostname could belong to a shared
+                // CDN. A missing hostname cannot authorize a direct route.
+                austria = true;
             }
         }
         let (mut remote, _permit) = self.dial(&target, proxy, austria).await?;
@@ -193,11 +211,9 @@ impl Proxy {
 
     async fn serve_socks(&self, mut client: TcpStream) -> io::Result<()> {
         let target = timeout(HELLO_TIMEOUT, socks_request(&mut client)).await??;
-        if self.protected_target(&target) || !matches!(target.port, 80 | 443) {
-            let (mut remote, _permit) = match self
-                .dial(&target, true, self.protected_target(&target))
-                .await
-            {
+        let austria = self.proxy_requires_country(&target);
+        if austria || !web::is_web_port(target.port) {
+            let (mut remote, _permit) = match self.dial(&target, true, austria).await {
                 Ok(remote) => remote,
                 Err(err) => {
                     client.write_all(socks_reply(2)).await?;
@@ -227,9 +243,9 @@ impl Proxy {
                 return Err(invalid());
             }
             let target = Target::authority(uri_host.ok_or_else(invalid)?, 443)?;
-            let austria = strict || self.protected_target(&target);
+            let austria = strict || self.proxy_requires_country(&target);
             let upgrade = hyper::upgrade::on(&mut req);
-            if austria || !matches!(target.port, 80 | 443) {
+            if austria || !web::is_web_port(target.port) {
                 let (mut remote, permit) = self.dial(&target, true, austria).await?;
                 tokio::spawn(async move {
                     let _permit = permit;
@@ -251,6 +267,7 @@ impl Proxy {
         let mut target = Target::authority(&authority, 80)?;
         let austria = strict
             || self.protected_target(&target)
+            || target.ip().is_some()
             || header_host
                 .and_then(|value| Target::authority(value, 80).ok())
                 .is_some_and(|host| self.protected_target(&host));
@@ -437,12 +454,18 @@ async fn socks_connect(stream: &mut TcpStream, target: &Target) -> io::Result<()
     Ok(())
 }
 
+struct AnnouncedHost {
+    name: String,
+    ech: bool,
+}
+
 async fn request_host(
     reader: &mut (impl AsyncRead + Unpin),
-    port: u16,
     prefix: &mut Vec<u8>,
-) -> io::Result<Option<String>> {
-    if port == 80 {
+) -> io::Result<Option<AnnouncedHost>> {
+    let first = reader.read_u8().await?;
+    if first != 22 {
+        prefix.push(first);
         let mut chunk = [0; 1024];
         while prefix.len() < 16 * 1024 {
             let length = reader.read(&mut chunk).await?;
@@ -457,7 +480,8 @@ async fn request_host(
                     for header in request.headers {
                         if header.name.eq_ignore_ascii_case("host") {
                             let value = std::str::from_utf8(header.value).map_err(|_| invalid())?;
-                            return Ok(Some(Target::authority(value.trim(), 80)?.host));
+                            let name = Target::authority(value.trim(), 80)?.host;
+                            return Ok(Some(AnnouncedHost { name, ech: false }));
                         }
                     }
                     return Ok(None);
@@ -469,11 +493,6 @@ async fn request_host(
         return Err(invalid());
     }
 
-    let first = reader.read_u8().await?;
-    if first != 22 {
-        prefix.push(first);
-        return Ok(None);
-    }
     let mut hello = Acceptor::default();
     let mut kind = first;
     while prefix.len() < 128 * 1024 {
@@ -492,7 +511,13 @@ async fn request_host(
         hello.read_tls(&mut bytes)?;
         match hello.accept() {
             Ok(Some(accepted)) => {
-                return Ok(accepted.client_hello().server_name().map(str::to_owned));
+                return Ok(accepted
+                    .client_hello()
+                    .server_name()
+                    .map(|name| AnnouncedHost {
+                        name: name.to_owned(),
+                        ech: web::has_ech(prefix).unwrap_or(true),
+                    }));
             }
             Ok(None) => kind = reader.read_u8().await?,
             Err(_) => return Err(invalid()),
@@ -590,7 +615,14 @@ pub async fn serve(gate: Arc<Gate>) -> io::Result<()> {
                         Inbound::Http { strict } => proxy.serve_http(stream, strict, None).await,
                         Inbound::Direct => {
                             if let Ok(addr) = original_destination(&stream) {
-                                if addr.port() == 80 {
+                                let mut first = [0];
+                                let http = web::is_web_port(addr.port())
+                                    && matches!(
+                                        timeout(HELLO_TIMEOUT, stream.peek(&mut first)).await,
+                                        Ok(Ok(1))
+                                    )
+                                    && first[0] != 22;
+                                if http {
                                     proxy.serve_http(stream, false, Some(addr)).await;
                                 } else if addr != stream.local_addr().unwrap_or(addr) {
                                     let _ = proxy.stream(stream, Target::from(addr), false).await;

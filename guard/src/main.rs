@@ -1,7 +1,9 @@
 mod gate;
 mod install;
 mod proxy;
+mod raw_firewall;
 mod watch;
+mod web;
 
 use std::env;
 use std::ffi::OsStr;
@@ -38,6 +40,18 @@ fn port(arg: Option<std::ffi::OsString>, default: u16) -> io::Result<u16> {
 
 fn run() -> io::Result<()> {
     let mut args = env::args_os().skip(1).peekable();
+    if args.next_if_eq(OsStr::new("--protect-raw")).is_some() {
+        let socks = port(args.next(), 0)?;
+        let http = port(args.next(), 0)?;
+        let gid = args
+            .next()
+            .and_then(|arg| arg.to_str()?.parse().ok())
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        if args.next().is_some() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        return raw_firewall::protect(socks, http, gid);
+    }
     if args.next_if_eq(OsStr::new("--install")).is_some() {
         let user = args
             .next()

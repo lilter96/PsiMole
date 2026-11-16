@@ -9,6 +9,7 @@ Conflicts=shutdown.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=/usr/local/bin/claude-at --protect-raw @SOCKS@ @HTTP@ @GID@
 ExecStart=/usr/sbin/nft -f /etc/claude-at/rules.nft
 
 [Install]

@@ -1,13 +1,13 @@
 # Country protection for Claude
 
-On Ubuntu with systemd-resolved, nftables and dnsmasq-base, the optional Rust
+On Ubuntu with systemd-resolved, nftables, iptables-legacy and dnsmasq-base, the optional Rust
 guard routes known Claude traffic through Psiphon. It protects a single local
 desktop account and needs root to install the firewall and DNS policy. The
 main GNOME extension and Psiphon must already be installed.
 
 Build as your normal desktop user, then install the guard. Replace `AT` with the
 country you want to allow. `--firefox` is optional. It locks Firefox to the
-existing Psiphon SOCKS proxy and requires an available Firefox policy slot.
+guard's SOCKS listener on `127.0.0.1:11081` and requires an available Firefox policy slot.
 
 ```sh
 cargo build --release --locked --manifest-path guard/Cargo.toml
@@ -31,13 +31,21 @@ approved tunnel. Every reconnect needs a fresh connected-region notice and
 an HTTPS check of the exit IP. A new IP is also checked with IPinfo. There is
 no recurring network probe while a tunnel stays connected.
 
-The firewall takes over Psiphon's two local proxy ports. For native apps it
+The firewall redirects applications configured for Psiphon's original proxy
+ports to the guard. A separate `iptables-legacy` OUTPUT rule rejects access
+to the raw listeners from sockets outside the guard group, including if
+`nft flush ruleset` removes the redirect. Firefox configured with `--firefox`
+and the guarded Claude Code launcher already connect directly to the guard.
+
+For native apps the firewall
 uses locally resolved names, Anthropic's published inbound IP blocks, and
-the hostname in HTTP or TLS to recognize requests with cached or alternate DNS.
-UDP port 443 for the protected account is rejected so HTTPS uses TCP. The guard
-depends on the traffic being identifiable on this Ubuntu host. Separate
-containers, remote tunnels, arbitrary third-party gateways and encrypted
-hostnames on shared infrastructure require their own routing policy.
+the hostname in HTTP or TLS to recognize requests with cached or alternate DNS,
+including the [standard and alternate CDN web ports](https://developers.cloudflare.com/fundamentals/reference/network-ports/).
+Connections without a usable name on these ports require a verified exit.
+An encrypted hello with an IP destination also requires a verified exit.
+UDP to the covered HTTPS ports is rejected for the protected account.
+Separate containers, remote tunnels, arbitrary third-party gateways and direct
+traffic outside these ports to shared addresses require their own routing policy.
 
 The protected names are in [assets/domains.txt](assets/domains.txt). The core
 zones come from [Claude Desktop](https://code.claude.com/docs/en/desktop#network-access-requirements)

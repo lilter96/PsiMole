@@ -1,4 +1,4 @@
-use crate::watch::POLICY_FILE;
+use crate::{raw_firewall, watch::POLICY_FILE, web};
 use serde_json::{Value, json};
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -197,11 +197,10 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
             .as_bool()
             .unwrap_or(false);
     let manage_firefox = manage_firefox || previous_firefox;
-    let firefox =
-        include_str!("../assets/firefox-policies.json").replace("@SOCKS@", &socks.to_string());
+    let firefox = include_str!("../assets/firefox-policies.json");
     if manage_firefox && Path::new(FIREFOX).exists() {
         let current = json_file(Path::new(FIREFOX))?;
-        let wanted = serde_json::from_str::<Value>(&firefox).map_err(io::Error::other)?;
+        let wanted = serde_json::from_str::<Value>(firefox).map_err(io::Error::other)?;
         let was_ours = previous_firefox
             && json_file(&Path::new(ETC).join("firefox-installed.json"))
                 .is_ok_and(|installed| installed == current);
@@ -213,6 +212,14 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
     }
 
     let gid = install_group()?;
+    let ports = |ports: &mut dyn Iterator<Item = u16>| {
+        ports
+            .map(|port| port.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let web_ports = ports(&mut web::ports());
+    let https_ports = ports(&mut web::HTTPS_PORTS.iter().copied());
     let template = |text: &str| {
         text.replace("@GID@", &gid.to_string())
             .replace("@UID@", &uid.to_string())
@@ -220,6 +227,8 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
             .replace("@PSI_DIR@", &psi_dir)
             .replace("@SOCKS@", &socks.to_string())
             .replace("@HTTP@", &http.to_string())
+            .replace("@WEB_PORTS@", &web_ports)
+            .replace("@HTTPS_PORTS@", &https_ports)
     };
     let dir = Path::new(ETC);
     fs::create_dir_all(dir)?;
@@ -233,6 +242,7 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
         "/usr/sbin/nft",
         &["--check", "-f", "/etc/claude-at/rules.nft.check"],
     )?;
+    raw_firewall::protect(socks, http, gid)?;
     fs::rename(dir.join("rules.nft.check"), rules)?;
     write(&dir.join("dnsmasq.conf"), dns_conf().as_bytes(), 0o644)?;
     command(
@@ -256,7 +266,7 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
         (UNIT, template(include_str!("../assets/claude-at.service"))),
         (
             FIREWALL,
-            include_str!("../assets/claude-at-firewall.service").to_owned(),
+            template(include_str!("../assets/claude-at-firewall.service")),
         ),
         (
             DNS,
@@ -284,8 +294,8 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
     )?;
     command("/usr/bin/systemctl", &["daemon-reload"])?;
     command("/usr/bin/systemctl", &["enable", UNIT, FIREWALL, DNS, LINK])?;
-    command("/usr/bin/systemctl", &["restart", UNIT, LINK, DNS])?;
     command("/usr/bin/systemctl", &["restart", FIREWALL])?;
+    command("/usr/bin/systemctl", &["restart", UNIT, LINK, DNS])?;
     Ok(())
 }
 
@@ -334,6 +344,7 @@ pub fn remove() -> io::Result<()> {
     if command("/usr/sbin/nft", &["list", "table", "inet", "claude_at"]).is_ok() {
         command("/usr/sbin/nft", &["delete", "table", "inet", "claude_at"])?;
     }
+    raw_firewall::remove()?;
     command(
         "/usr/sbin/runuser",
         &["-u", user, "--", BIN, "--unwrap-cli"],

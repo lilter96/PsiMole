@@ -3,6 +3,8 @@ delete table inet claude_at
 table inet claude_at {
     set v4 { type ipv4_addr; flags interval; elements = { 160.79.104.0/23, 153.61.224.0/22 }; }
     set v6 { type ipv6_addr; flags interval; elements = { 2607:6bc0::/48 }; }
+    set web_ports { type inet_service; elements = { @WEB_PORTS@ }; }
+    set https_ports { type inet_service; elements = { @HTTPS_PORTS@ }; }
 
     chain local_redirect {
         type nat hook output priority dstnat - 10; policy accept;
@@ -16,8 +18,8 @@ table inet claude_at {
 
         # Inspect the hostname for ordinary direct web connections, including
         # browsers with cached DNS and shared CDN IPs. Exclude local services.
-        meta skuid @UID@ ip daddr != { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } tcp dport { 80, 443 } counter redirect to :15443
-        meta skuid @UID@ ip6 daddr != { ::1, fc00::/7, fe80::/10 } tcp dport { 80, 443 } counter redirect to :15443
+        meta skuid @UID@ ip daddr != { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } tcp dport @web_ports counter redirect to :15443
+        meta skuid @UID@ ip6 daddr != { ::1, fc00::/7, fe80::/10 } tcp dport @web_ports counter redirect to :15443
     }
 
     chain no_bypass {
@@ -29,7 +31,7 @@ table inet claude_at {
         meta skgid @GID@ return
         # This also stops old TCP flows established before the REDIRECT.
         ip daddr 127.0.0.1 tcp dport { @SOCKS@, @HTTP@ } counter reject with tcp reset
-        meta skuid @UID@ udp dport 443 oifname != "lo" counter reject with icmpx type port-unreachable
+        meta skuid @UID@ udp dport @https_ports oifname != "lo" counter reject with icmpx type port-unreachable
     }
 
     chain local_dns {
