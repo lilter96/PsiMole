@@ -1,4 +1,4 @@
-use crate::platform::{self, HideOnClose, WindowCommands};
+use crate::platform::{self, WindowCommands, WindowVisibility};
 use crate::runtime::{Action, ClientHandle, Phase, Protection, Snapshot, SpeedTest};
 use eframe::egui::{
     self, Align, Color32, ComboBox, Context, Frame, Layout, Margin, RichText, Stroke, Vec2,
@@ -154,7 +154,7 @@ struct Desktop {
     state: Snapshot,
     mascot: egui::TextureHandle,
     tray: Option<Tray>,
-    hide_on_close: Option<HideOnClose>,
+    visibility: Option<WindowVisibility>,
     quit: mpsc::Receiver<()>,
     quitting: bool,
 }
@@ -184,13 +184,9 @@ impl Desktop {
                 context.request_repaint();
             }
         };
-        platform::listen_for_window(commands, hwnd, close.clone());
-        let tray = Tray::create(&icon, hwnd, close).ok();
-        let hide_on_close = if tray.is_some() {
-            Some(HideOnClose::install(hwnd)?)
-        } else {
-            None
-        };
+        let tray = Tray::create(&icon, hwnd, close.clone()).ok();
+        let visibility = Some(WindowVisibility::install(hwnd, tray.is_some())?);
+        platform::listen_for_window(commands, hwnd, close);
         if let Some(tray) = &tray {
             tray.language(Language(
                 state
@@ -209,7 +205,7 @@ impl Desktop {
             state,
             mascot,
             tray,
-            hide_on_close,
+            visibility,
             quit,
             quitting: false,
         })
@@ -508,7 +504,7 @@ impl eframe::App for Desktop {
         if self.quit.try_recv().is_ok() {
             self.quitting = true;
             self.client.shutdown();
-            self.hide_on_close.take();
+            self.visibility.take();
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }

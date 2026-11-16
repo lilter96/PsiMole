@@ -22,8 +22,11 @@ use windows_sys::Win32::System::Registry::{
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SW_HIDE, SW_RESTORE, SetForegroundWindow, ShowWindow, ShowWindowAsync, WM_CLOSE,
+    IsIconic, PostMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow, WM_APP,
+    WM_CLOSE,
 };
+
+const SHOW_WINDOW: u32 = WM_APP + 1;
 
 fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
     value.as_ref().encode_wide().chain([0]).collect()
@@ -149,46 +152,61 @@ pub fn listen_for_window(commands: WindowCommands, hwnd: isize, quit: impl Fn() 
 }
 
 pub fn show_window(hwnd: isize) {
-    let hwnd = hwnd as _;
     unsafe {
-        ShowWindowAsync(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd);
+        PostMessageW(hwnd as HWND, SHOW_WINDOW, 0, 0);
     }
 }
 
-pub struct HideOnClose(HWND);
+pub struct WindowVisibility(HWND);
 
-impl HideOnClose {
-    pub fn install(hwnd: isize) -> io::Result<Self> {
+impl WindowVisibility {
+    pub fn install(hwnd: isize, hide_on_close: bool) -> io::Result<Self> {
         let hwnd = hwnd as HWND;
-        win32(unsafe { SetWindowSubclass(hwnd, Some(hide_on_close), 1, 0) })?;
+        win32(unsafe {
+            SetWindowSubclass(hwnd, Some(window_visibility), 1, usize::from(hide_on_close))
+        })?;
         Ok(Self(hwnd))
     }
 }
 
-impl Drop for HideOnClose {
+impl Drop for WindowVisibility {
     fn drop(&mut self) {
         unsafe {
-            RemoveWindowSubclass(self.0, Some(hide_on_close), 1);
+            RemoveWindowSubclass(self.0, Some(window_visibility), 1);
         }
     }
 }
 
-unsafe extern "system" fn hide_on_close(
+unsafe extern "system" fn window_visibility(
     hwnd: HWND,
     message: u32,
     wparam: WPARAM,
     lparam: LPARAM,
     _id: usize,
-    _data: usize,
+    hide_on_close: usize,
 ) -> LRESULT {
-    if message == WM_CLOSE {
-        unsafe {
-            ShowWindow(hwnd, SW_HIDE);
+    match message {
+        WM_CLOSE if hide_on_close != 0 => {
+            unsafe {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+            0
         }
-        return 0;
+        SHOW_WINDOW => {
+            // Apply visibility on the window's owning thread.
+            unsafe {
+                let command = if IsIconic(hwnd) == 0 {
+                    SW_SHOW
+                } else {
+                    SW_RESTORE
+                };
+                ShowWindow(hwnd, command);
+                SetForegroundWindow(hwnd);
+            }
+            0
+        }
+        _ => unsafe { DefSubclassProc(hwnd, message, wparam, lparam) },
     }
-    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 pub fn default_russian() -> bool {
