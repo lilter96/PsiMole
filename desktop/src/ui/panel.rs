@@ -141,14 +141,18 @@ impl Desktop {
                 widgets.hovered.weak_bg_fill = hover;
                 widgets.active.weak_bg_fill = hover;
                 ui.add(
-                    Button::new(semibold(
-                        if running {
-                            language.text("Disconnect", "Выключить")
-                        } else {
-                            language.text("Connect", "Включить")
-                        },
-                        14.0,
-                        if running { CORAL } else { Color32::WHITE },
+                    Button::new((
+                        egui::Atom::grow(),
+                        semibold(
+                            if running {
+                                language.text("Disconnect", "Выключить")
+                            } else {
+                                language.text("Connect", "Включить")
+                            },
+                            14.0,
+                            if running { CORAL } else { Color32::WHITE },
+                        ),
+                        egui::Atom::grow(),
                     ))
                     .min_size(vec2(ui.available_width(), 39.0))
                     .corner_radius(20),
@@ -502,17 +506,19 @@ impl Desktop {
 }
 
 fn tile(ui: &mut Ui, width: f32, title: &str, body: impl FnOnce(&mut Ui)) {
-    Frame::new()
-        .fill(SURFACE)
-        .corner_radius(13)
-        .inner_margin(Margin::symmetric(11, 8))
-        .show(ui, |ui| {
-            ui.set_width(width - 22.0);
-            ui.set_min_height(51.0);
-            ui.label(regular(title, 11.0, MUTED));
-            ui.add_space(2.0);
-            body(ui);
-        });
+    ui.allocate_ui_with_layout(vec2(width, 67.0), Layout::top_down(Align::Min), |ui| {
+        Frame::new()
+            .fill(SURFACE)
+            .corner_radius(13)
+            .inner_margin(Margin::symmetric(11, 8))
+            .show(ui, |ui| {
+                ui.set_width(width - 22.0);
+                ui.set_min_height(51.0);
+                ui.label(regular(title, 11.0, MUTED));
+                ui.add_space(2.0);
+                body(ui);
+            });
+    });
 }
 
 fn setting_row(
@@ -575,5 +581,30 @@ fn byte_rate(bytes: u64, language: Language) -> String {
         )
     } else {
         format!("{bytes} {}", language.text("B/s", "Б/с"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metric_tiles_stack_text_without_widening_the_panel() {
+        let ctx = egui::Context::default();
+        super::super::theme::install(&ctx);
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let row = ui.horizontal(|ui| {
+                    for _ in 0..2 {
+                        tile(ui, 150.0, "Скорость VPN", |ui| {
+                            let value = ui.label(semibold("↓ 195.1 Мбит/с", 16.0, TEXT));
+                            let detail = ui.label(regular("↑ 94.1 Мбит/с", 11.0, MUTED));
+                            assert!(value.rect.bottom() <= detail.rect.top());
+                        });
+                    }
+                });
+                assert!(row.response.rect.width() <= 307.0);
+            });
+        });
     }
 }
