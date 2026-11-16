@@ -4,10 +4,11 @@
 
 <h1 align="center">PsiMole</h1>
 
-<p align="center"><strong>Psiphon for GNOME on Linux</strong></p>
+<p align="center"><strong>Psiphon for GNOME and Windows</strong></p>
 
 <p align="center">
   <a href="#quick-start">Install</a> ·
+  <a href="https://github.com/lilter96/PsiMole/releases/latest">Downloads</a> ·
   <a href="#see-it-in-action">Demo</a> ·
   <a href="#country-protection-for-claude">Claude country lock</a> ·
   <a href="README.ru.md">Русский</a> ·
@@ -16,10 +17,10 @@
 
 [![Tests](https://github.com/lilter96/PsiMole/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/lilter96/PsiMole/actions/workflows/test.yml)
 
-PsiMole is a GNOME Shell extension for the
-[Psiphon](https://github.com/Psiphon-Labs/psiphon-tunnel-core) proxy. A miner mole
-in your top bar sleeps when the tunnel is off, digs while it connects, and
-switches on its headlamp once you're online.
+PsiMole runs the [Psiphon](https://github.com/Psiphon-Labs/psiphon-tunnel-core)
+proxy from a GNOME Shell extension on Linux or a desktop app on Windows. The
+miner mole sleeps when the tunnel is off, digs while it connects, and switches
+on its headlamp once you're online.
 
 - **Choose an exit country** and see the current country, uptime, latency and traffic.
 - **Set the GNOME system proxy** in one click to route compatible apps through
@@ -31,12 +32,21 @@ switches on its headlamp once you're online.
 
 ## Quick start
 
-Use a GNOME Shell 46–51 session on Linux, with Git and `curl` or `wget`.
+### Windows x64
+
+Run the installer and open **PsiMole** from the Start menu. Closing the
+window sends it to the system tray. [Download the installer](https://github.com/lilter96/PsiMole/releases/latest/download/PsiMole-Setup-x64.exe) · [Windows guide](desktop/README.md)
+
+### Ubuntu x86_64 with GNOME
+
+Use a GNOME Shell 46–51 session with `curl` or `wget`.
 The installer downloads Psiphon on x86_64 and runs as your desktop user.
 
+Download the archive and run the following in the directory where you saved it. [Download for Ubuntu](https://github.com/lilter96/PsiMole/releases/latest/download/PsiMole-Ubuntu-x64.tar.gz)
+
 ```sh
-git clone https://github.com/lilter96/PsiMole.git
-cd PsiMole
+tar -xzf PsiMole-Ubuntu-x64.tar.gz
+cd PsiMole-Ubuntu-x64
 ./install.sh
 ```
 
