@@ -38,7 +38,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return Err(error.into());
                 }
             } else {
-                platform::signal(&commands.show)?;
+                commands.reopen()?;
             }
         }
     }

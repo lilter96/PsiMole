@@ -11,7 +11,7 @@ use std::process::{Child, Command};
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, WAIT_OBJECT_0,
-    WPARAM,
+    WAIT_TIMEOUT, WPARAM,
 };
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Dwm::{
@@ -25,8 +25,9 @@ use windows_sys::Win32::System::Registry::{
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    IsIconic, IsWindowVisible, PostMessageW, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE,
-    SW_SHOW, SetForegroundWindow, ShowWindow, SystemParametersInfoW, WM_APP, WM_CLOSE,
+    IsIconic, IsWindowVisible, SMTO_BLOCK, SMTO_ERRORONEXIT, SPI_GETCLIENTAREAANIMATION, SW_HIDE,
+    SW_RESTORE, SW_SHOW, SendMessageTimeoutW, SetForegroundWindow, ShowWindow,
+    SystemParametersInfoW, WM_APP, WM_CLOSE,
 };
 
 const SHOW_WINDOW: u32 = WM_APP + 1;
@@ -95,30 +96,48 @@ pub fn try_instance(dir: &Path) -> io::Result<Option<File>> {
     }
 }
 
-fn event(dir: &Path, suffix: &str) -> io::Result<OwnedHandle> {
+fn event(dir: &Path, suffix: &str, manual_reset: bool) -> io::Result<OwnedHandle> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     use std::hash::{Hash, Hasher};
     dir.as_os_str().hash(&mut hasher);
     let name = wide(format!("Local\\PsiMole.{:016x}.{suffix}", hasher.finish()));
-    // Auto-reset events retain a single request until a listener starts waiting.
-    handle(unsafe { CreateEventW(null(), 0, 0, name.as_ptr()) })
+    handle(unsafe { CreateEventW(null(), i32::from(manual_reset), 0, name.as_ptr()) })
 }
 
 pub struct WindowCommands {
-    pub show: OwnedHandle,
-    pub quit: OwnedHandle,
+    show: OwnedHandle,
+    shown: OwnedHandle,
+    quit: OwnedHandle,
 }
 
 impl WindowCommands {
     pub fn new(dir: &Path) -> io::Result<Self> {
         Ok(Self {
-            show: event(dir, "show")?,
-            quit: event(dir, "quit")?,
+            show: event(dir, "show", false)?,
+            shown: event(dir, "shown", true)?,
+            quit: event(dir, "quit", false)?,
         })
+    }
+
+    pub fn reopen(&self) -> io::Result<()> {
+        // Several launches can share one acknowledgement once the window is visible.
+        win32(unsafe { ResetEvent(self.shown.as_raw_handle()) })?;
+        for _ in 0..2 {
+            signal(&self.show)?;
+            match unsafe { WaitForSingleObject(self.shown.as_raw_handle(), 5_000) } {
+                WAIT_OBJECT_0 => return Ok(()),
+                WAIT_TIMEOUT => {}
+                _ => return Err(io::Error::last_os_error()),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "PsiMole is running but did not reopen its window",
+        ))
     }
 }
 
-pub fn signal(event: &OwnedHandle) -> io::Result<()> {
+fn signal(event: &OwnedHandle) -> io::Result<()> {
     win32(unsafe { SetEvent(event.as_raw_handle()) })
 }
 
@@ -146,7 +165,11 @@ pub fn listen_for_window(commands: WindowCommands, hwnd: isize, quit: impl Fn() 
         let handles = [commands.show.as_raw_handle(), commands.quit.as_raw_handle()];
         loop {
             match unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) } {
-                WAIT_OBJECT_0 => show_window(hwnd),
+                WAIT_OBJECT_0 => {
+                    if show_window(hwnd) {
+                        let _ = signal(&commands.shown);
+                    }
+                }
                 result if result == WAIT_OBJECT_0 + 1 => quit(),
                 _ => return,
             }
@@ -154,10 +177,20 @@ pub fn listen_for_window(commands: WindowCommands, hwnd: isize, quit: impl Fn() 
     });
 }
 
-pub fn show_window(hwnd: isize) {
-    unsafe {
-        PostMessageW(hwnd as HWND, SHOW_WINDOW, 0, 0);
-    }
+pub fn show_window(hwnd: isize) -> bool {
+    let mut visible = 0;
+    let sent = unsafe {
+        SendMessageTimeoutW(
+            hwnd as HWND,
+            SHOW_WINDOW,
+            0,
+            0,
+            SMTO_BLOCK | SMTO_ERRORONEXIT,
+            4_000,
+            &mut visible,
+        )
+    };
+    sent != 0 && visible != 0
 }
 
 pub fn apply_window_theme(hwnd: isize, background: [u8; 4], text: [u8; 4]) {
@@ -236,8 +269,8 @@ unsafe extern "system" fn window_visibility(
                 };
                 ShowWindow(hwnd, command);
                 SetForegroundWindow(hwnd);
+                LRESULT::from(IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0)
             }
-            0
         }
         _ => unsafe { DefSubclassProc(hwnd, message, wparam, lparam) },
     }

@@ -106,7 +106,7 @@ jobs:
           if (Test-Path $startupLog) { throw (Get-Content -Raw $startupLog) }
           $window = $app.MainWindowHandle
           if (![DesktopWindow]::IsWindowVisible($window)) { throw 'Main window started hidden' }
-          for ($cycle = 1; $cycle -le 3; $cycle++) {
+          for ($cycle = 1; $cycle -le 8; $cycle++) {
             if (![DesktopWindow]::PostMessageW($window, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) {
               throw "Could not send WM_CLOSE ($([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
             }
@@ -115,8 +115,12 @@ jobs:
               if ($app.HasExited) { throw "Window close exited the process with $($app.ExitCode)" }
               ![DesktopWindow]::IsWindowVisible($window)
             } "Window did not hide on cycle $cycle"
-            $second = Start-Process -FilePath $exe -PassThru -Wait
-            if ($second.ExitCode -ne 0) { throw 'Second launch failed' }
+            $second = Start-Process -FilePath $exe -PassThru
+            if (!$second.WaitForExit(15000)) {
+              Stop-Process -Id $second.Id -Force
+              throw "Second launch did not acknowledge the window on cycle $cycle"
+            }
+            if ($second.ExitCode -ne 0) { throw "Second launch failed on cycle $cycle" }
             Wait-For { !$app.HasExited -and [DesktopWindow]::IsWindowVisible($window) } "Second launch did not restore the same window on cycle $cycle"
           }
           $quit = Start-Process -FilePath $exe -ArgumentList '--quit-if-running' -PassThru -Wait
