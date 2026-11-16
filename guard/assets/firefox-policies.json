@@ -1,0 +1,17 @@
+{
+  "policies": {
+    "Proxy": {
+      "Mode": "manual",
+      "Locked": true,
+      "SOCKSProxy": "127.0.0.1:@SOCKS@",
+      "SOCKSVersion": 5,
+      "UseProxyForDNS": true
+    },
+    "DNSOverHTTPS": {
+      "Enabled": false,
+      "Locked": true
+    },
+    "DisableEncryptedClientHello": true,
+    "IPProtectionAvailable": false
+  }
+}

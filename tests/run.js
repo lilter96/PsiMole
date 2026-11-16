@@ -6,5 +6,6 @@ import './settings.test.js';
 import './process.test.js';
 import './psi.test.js';
 import './install.test.js';
+import './guard.test.js';
 
 System.exit(await run() ? 1 : 0);

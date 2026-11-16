@@ -1,0 +1,18 @@
+[Unit]
+Description=Local DNS answers for Claude domains
+BindsTo=claude-at-dns-link.service
+After=claude-at-dns-link.service
+PartOf=claude-at-dns-link.service
+
+[Service]
+DynamicUser=yes
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/claude-at/dnsmasq.conf
+Restart=on-failure
+RestartSec=1s
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

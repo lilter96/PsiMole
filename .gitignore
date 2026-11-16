@@ -1,3 +1,4 @@
 tools/media/out/
 psiphon-tunnel@terentiy/schemas/gschemas.compiled
 tools/versions/out/
+guard/target/

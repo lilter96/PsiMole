@@ -167,6 +167,16 @@ const en = {
         fastest: 'Psiphon picks the fastest',
         restart: 'The tunnel reconnects through the new country, a few seconds without a connection.',
     },
+    guard: {
+        title: 'Country for Claude',
+        description: 'Claude is available only through Psiphon in this country.',
+        ready: 'Access allowed',
+        checking: 'Checking exit IP',
+        blocked: 'Access blocked',
+        failed: 'IP check failed',
+        unavailable: 'Protection unavailable',
+        saveError: message => `Could not save the Claude country: ${message}`,
+    },
     notify: {
         closedTitle: 'Tunnel closed',
         closedBody: names => `${en.join(names)} closed, so the mole closed the tunnel.`,
@@ -292,6 +302,16 @@ const ru = {
         title: 'Страна',
         fastest: 'Psiphon выберет самую быструю',
         restart: 'Туннель переподключится через новую страну, связи не будет несколько секунд.',
+    },
+    guard: {
+        title: 'Страна для Claude',
+        description: 'Claude доступен только через Psiphon в выбранной стране.',
+        ready: 'Доступ разрешён',
+        checking: 'Проверяется выходной IP',
+        blocked: 'Доступ заблокирован',
+        failed: 'IP не подтверждён',
+        unavailable: 'Защита недоступна',
+        saveError: message => `Не удалось сохранить страну для Claude: ${message}`,
     },
     notify: {
         closedTitle: 'Туннель закрыт',

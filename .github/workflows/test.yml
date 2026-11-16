@@ -5,6 +5,14 @@ on:
   pull_request:
 
 jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo fmt --manifest-path guard/Cargo.toml -- --check
+      - run: cargo clippy --locked --manifest-path guard/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path guard/Cargo.toml
+
   gjs:
     runs-on: ubuntu-24.04
     steps:

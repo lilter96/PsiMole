@@ -71,7 +71,7 @@ class Card extends St.BoxLayout {
         this.scene = new SceneView(this.mole);
         this._model = null;
         this._confirm = null;           // names, while the "are you sure" sheet is up
-        this._picking = false;          // the list of countries is open
+        this._picking = null;           // 'vpn' or 'claude'
         this._lang = null;
         this._chipsKey = null;
 
@@ -137,7 +137,7 @@ class Card extends St.BoxLayout {
     _buildGroup() {
         this._group = new St.BoxLayout({...COLUMN, style_class: 'pt-group'});
 
-        this._countryRow = button('pt-group-row', () => this._pick(true));
+        this._countryRow = button('pt-group-row', () => this._pick('vpn'));
         const country = new St.BoxLayout({x_expand: true});
         this._countryLabel = new St.Label({style_class: 'pt-group-label', x_expand: true, y_align: CENTER});
         this._countryValue = new St.Label({style_class: 'pt-group-value', y_align: CENTER});
@@ -146,6 +146,19 @@ class Card extends St.BoxLayout {
         country.add_child(this._countryValue);
         country.add_child(new St.Label({style_class: 'pt-group-chevron', text: '›', y_align: CENTER}));
         this._countryRow.set_child(country);
+
+        this._guardRow = button('pt-group-row', () => this._pick('claude'));
+        const guard = new St.BoxLayout({x_expand: true});
+        const guardText = new St.BoxLayout({...COLUMN, x_expand: true, y_align: CENTER});
+        const guardLabel = new St.Label({style_class: 'pt-group-label', text: 'Claude'});
+        this._guardStatus = new St.Label({style_class: 'pt-group-sub'});
+        this._guardValue = new St.Label({style_class: 'pt-group-value', y_align: CENTER});
+        guardText.add_child(guardLabel);
+        guardText.add_child(this._guardStatus);
+        guard.add_child(guardText);
+        guard.add_child(this._guardValue);
+        guard.add_child(new St.Label({style_class: 'pt-group-chevron', text: '›', y_align: CENTER}));
+        this._guardRow.set_child(guard);
 
         this._proxyRow = button('pt-group-row', () => this._act('proxy'));
         const proxy = new St.BoxLayout({x_expand: true});
@@ -161,6 +174,7 @@ class Card extends St.BoxLayout {
         this._proxyRow.set_child(proxy);
 
         this._group.add_child(this._countryRow);
+        this._group.add_child(this._guardRow);
         this._group.add_child(this._proxyRow);
     }
 
@@ -169,7 +183,7 @@ class Card extends St.BoxLayout {
         this._picker = new St.BoxLayout({...COLUMN, style_class: 'pt-picker', visible: false});
         const head = new St.BoxLayout({style_class: 'pt-picker-head'});
         this._back = new St.Button({style_class: 'pt-picker-back', can_focus: true, y_align: CENTER});
-        this._back.connect('clicked', () => this._pick(false));
+        this._back.connect('clicked', () => this._pick(null));
         this._pickerTitle = new St.Label({style_class: 'pt-section-title', y_align: CENTER, x_expand: true,
             x_align: Clutter.ActorAlign.END});
         head.add_child(this._back);
@@ -217,7 +231,7 @@ class Card extends St.BoxLayout {
 
     pause() {
         this.scene.pause();
-        this._picking = false;
+        this._picking = null;
         this.confirm(null);
     }
 
@@ -246,8 +260,9 @@ class Card extends St.BoxLayout {
         // the tunnel went away by itself: nothing left to confirm
         if (this._confirm && !RUNNING.has(model.state))
             this._confirm = null;
-        if (this._picking && !this._canPick())
-            this._picking = false;
+        if ((this._picking === 'vpn' && !this._canPick()) ||
+            (this._picking === 'claude' && !model.guard))
+            this._picking = null;
         this._syncHead();
         this._syncControls();
         this._syncTiles();
@@ -460,6 +475,13 @@ class Card extends St.BoxLayout {
         toggle(this._countryRow, 'pt-dim', !can);
         this._countryValue.text = m.chosen === null ? '—' : where(m.chosen) || T.settings.fastest;
 
+        this._guardRow.visible = !!m.guard;
+        if (m.guard) {
+            this._guardStatus.text = T.guard[m.guard.phase];
+            this._guardValue.text = where(m.guard.country);
+            this._guardRow.accessible_name = `Claude: ${this._guardValue.text}, ${this._guardStatus.text}`;
+        }
+
         const p = m.proxy;
         toggle(this._switch, 'pt-on', p.want);
         this._knob.x_align = p.want ? Clutter.ActorAlign.END : Clutter.ActorAlign.START;
@@ -469,25 +491,28 @@ class Card extends St.BoxLayout {
 
     _syncPicker() {
         const m = this._model;
-        this._picker.visible = this._picking;
+        this._picker.visible = !!this._picking;
         if (!this._picking)
             return;
-        const key = `${T.code}|${m.chosen}|${m.regions.join()}`;
+        const claude = this._picking === 'claude';
+        const chosen = claude ? m.guard.country : m.chosen;
+        const key = `${T.code}|${this._picking}|${chosen}|${m.regions.join()}`;
         if (key !== this._chipsKey) {
             this._chipsKey = key;
-            this._fillChips(m);
+            this._fillChips(m.regions, chosen, claude);
         }
         const running = RUNNING.has(m.state);
-        this._pickerNote.text = running ? T.picker.restart : '';
-        this._pickerNote.visible = running;
+        this._pickerTitle.text = claude ? T.guard.title : T.picker.title;
+        this._pickerNote.text = claude ? T.guard.description : running ? T.picker.restart : '';
+        this._pickerNote.visible = claude || running;
     }
 
-    _fillChips(m) {
+    _fillChips(regions, chosen, claude) {
         this._chips.destroy_all_children();
-        const codes = [...new Set([...m.regions, ...(m.chosen ? [m.chosen] : [])])]
+        const codes = [...new Set([...regions, ...(chosen ? [chosen] : [])])]
             .sort((a, b) => T.region(a).localeCompare(T.region(b), T.code));
         const chip = (code, text, flag) => {
-            const on = (m.chosen ?? '') === code;
+            const on = (chosen ?? '') === code;
             const b = new St.Button({style_class: `pt-chip${on ? ' pt-chip-on' : ''}`, can_focus: true, x_expand: true,
                 accessible_name: text});
             const box = new St.BoxLayout({style_class: 'pt-chip-box', x_expand: true});
@@ -497,15 +522,17 @@ class Card extends St.BoxLayout {
             box.add_child(name);
             b.set_child(box);
             b.connect('clicked', () => {
-                this._pick(false);
-                if (!on)
-                    this.onAction?.('region', code);
+                this._pick(null);
+                if (claude || !on)
+                    this.onAction?.(claude ? 'claude-country' : 'region', code);
             });
             return b;
         };
-        const first = new St.BoxLayout({style_class: 'pt-chips-row'});
-        first.add_child(chip('', T.picker.fastest, '⚡'));
-        this._chips.add_child(first);
+        if (!claude) {
+            const first = new St.BoxLayout({style_class: 'pt-chips-row'});
+            first.add_child(chip('', T.picker.fastest, '⚡'));
+            this._chips.add_child(first);
+        }
         for (let i = 0; i < codes.length; i += 2) {
             const row = new St.BoxLayout({style_class: 'pt-chips-row'});
             row.layout_manager.homogeneous = true;
@@ -515,7 +542,7 @@ class Card extends St.BoxLayout {
                 row.add_child(new St.Widget({x_expand: true}));
             this._chips.add_child(row);
         }
-        const rows = 1 + Math.ceil(codes.length / 2);
+        const rows = (claude ? 0 : 1) + Math.ceil(codes.length / 2);
         this._scroll.style = `height: ${Math.min(rows * CHIP_ROW, PICKER_MAX)}px;`;
     }
 

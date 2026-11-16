@@ -1,0 +1,21 @@
+[Unit]
+Description=Local DNS route for Claude domains
+Requires=systemd-resolved.service
+After=systemd-resolved.service
+PartOf=systemd-resolved.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip link add claude-at-dns type dummy
+ExecStart=/usr/sbin/ip address add 169.254.227.53/32 dev claude-at-dns
+ExecStart=/usr/sbin/ip link set claude-at-dns up
+ExecStart=/usr/bin/resolvectl default-route claude-at-dns no
+ExecStart=/usr/bin/resolvectl dnssec claude-at-dns no
+ExecStart=/usr/bin/resolvectl dns claude-at-dns 169.254.227.53:10553
+ExecStart=/usr/bin/resolvectl domain claude-at-dns @DNS_DOMAINS@
+ExecStart=/usr/bin/resolvectl flush-caches
+ExecStopPost=-/usr/sbin/ip link delete claude-at-dns
+
+[Install]
+WantedBy=multi-user.target

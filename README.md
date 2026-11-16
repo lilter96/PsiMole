@@ -113,6 +113,14 @@ layout and permissions. A running Psiphon is then restarted, which leaves the
 programs on the tunnel without a connection for a few seconds. `psi region`
 does the same from a terminal.
 
+## Country protection for Claude
+
+The optional [country guard](guard/README.md) adds a **Claude** row to the mole's
+menu. Pick the country allowed for Claude there. The **Country** row still
+selects where Psiphon connects. The two choices need to match for Claude to
+work. The guard applies to the web app, Claude Code and local apps that use the
+same Anthropic destinations.
+
 ## The system proxy
 
 Off until you switch it on, in the popup or in the settings. While the tunnel is

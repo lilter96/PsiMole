@@ -1,0 +1,22 @@
+# Anthropic network requirements and independently identified Claude domains.
+# Each line covers the domain and its subdomains. '=' denotes an exact host.
+anthropic.com
+claude.ai
+claude.com
+claude.app
+claudeusercontent.com
+claudemcpcontent.com
+antspace.dev
+clau.de
+claude.dev
+claude.new
+claude.site
+claudeacademy.com
+claudemcpclient.com
+claudepages.dev
+claudestudio.com
+=claude.googleapis.com
+=http-intake.logs.us5.datadoghq.com
+=browser-intake-us5-datadoghq.com
+=o1158394.ingest.us.sentry.io
+=servd-anthropic-website.b-cdn.net

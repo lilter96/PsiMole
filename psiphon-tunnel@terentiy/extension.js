@@ -12,6 +12,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {Card} from './card.js';
+import {readGuard, writeGuardCountry} from './guard.js';
 import {T, setLanguage} from './lang.js';
 import {SystemProxy, proxyPlan} from './proxy.js';
 import {Psiphon, Users, configPorts, defaultPaths, probe, procStat, writeRegion} from './psiphon.js';
@@ -119,7 +120,10 @@ export default class PsiphonTunnelExtension extends Extension {
         });
         this._users = new Users({
             self,
-            exclude: () => this._psiphon ? [this._psiphon.proc?.pid, ...this._psiphon.extra.map(p => p.pid)] : [],
+            exclude: () => this._psiphon ? [
+                this._psiphon.proc?.pid, ...this._psiphon.extra.map(p => p.pid),
+                readGuard(GLib.path_get_dirname(this._psiphon.paths.conf))?.pid,
+            ] : [],
         });
         this._adopt();
 
@@ -301,6 +305,14 @@ export default class PsiphonTunnelExtension extends Extension {
             break;
         case 'region':
             this._setRegion(arg);
+            break;
+        case 'claude-country':
+            try {
+                writeGuardCountry(GLib.path_get_dirname(this._psiphon.paths.conf), arg);
+            } catch (e) {
+                this._notify(T.notify.countryTitle, T.guard.saveError(e.message));
+            }
+            this._refresh();
             break;
         case 'proxy':
             this._settings.set_boolean('system-proxy', !this._settings.get_boolean('system-proxy'));
@@ -566,6 +578,7 @@ export default class PsiphonTunnelExtension extends Extension {
             region: log.region,
             chosen: conf.readable ? conf.region ?? '' : null,
             regions: log.regions.length ? log.regions : this._state.regions ?? DEFAULT_REGIONS,
+            guard: readGuard(GLib.path_get_dirname(ps.paths.conf)),
             switching: this._switching,
             proxy: {want: this._settings.get_boolean('system-proxy'), applied: !!this._state.proxy},
             uptime: log.upAt ? now - log.upAt : 0,

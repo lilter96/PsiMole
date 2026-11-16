@@ -158,6 +158,27 @@ export default class Media extends Extension {
         await shot('card_off', box());
         check('the popup too', me._card._title.text === L.titles.off, me._card._title.text);
 
+        if (FAKE) {
+            const policy = GLib.build_filenamev([GLib.path_get_dirname(ps().paths.conf), 'claude-country.json']);
+            GLib.file_set_contents(policy, '{"service":"claude","country":"AT"}');
+            me._refresh();
+            check('Claude has its own country row', me._card._guardRow.visible);
+            me._card._guardRow.emit('clicked', 1);
+            const rows = me._card._chips.get_children();
+            const choices = rows.flatMap(row => row.get_children());
+            const germany = choices.find(chip => chip.accessible_name === L.region('DE'));
+            check('the Claude picker offers countries but no automatic location',
+                me._card._picker.visible && me._card._pickerTitle.text === L.guard.title &&
+                !!germany && !choices.some(chip => chip.accessible_name === L.picker.fastest));
+            await sleep(350);
+            await shot('card_claude_picker', box());
+            germany?.emit('clicked', 1);
+            check('selecting Claude country does not switch Psiphon',
+                JSON.parse(cat(policy)).country === 'DE' &&
+                JSON.parse(cat(ps().paths.conf)).EgressRegion === '' && ps().state === 'off');
+            Gio.File.new_for_path(policy).delete(null);
+        }
+
         // Turn on
         let t0 = now();
         me._card._main.emit('clicked', 1);

@@ -1,0 +1,24 @@
+[Unit]
+Description=Psiphon country protection for Claude
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+TimeoutStartSec=15s
+User=@USER@
+Group=claude-at
+ExecStart=/usr/local/bin/claude-at --serve "@PSI_DIR@" @SOCKS@ @HTTP@
+RuntimeDirectory=claude-at
+RuntimeDirectoryMode=0750
+Restart=always
+RestartSec=1s
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths="@PSI_DIR@"
+PrivateTmp=yes
+NoNewPrivileges=yes
+UMask=0027
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
