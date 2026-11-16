@@ -1,8 +1,8 @@
 add table inet claude_at
 delete table inet claude_at
 table inet claude_at {
-    set v4 { type ipv4_addr; flags interval; elements = { 160.79.104.0/23, 153.61.224.0/22 }; }
-    set v6 { type ipv6_addr; flags interval; elements = { 2607:6bc0::/48 }; }
+    set v4 { type ipv4_addr; flags interval; elements = { @ANTHROPIC_V4@ }; }
+    set v6 { type ipv6_addr; flags interval; elements = { @ANTHROPIC_V6@ }; }
     set web_ports { type inet_service; elements = { @WEB_PORTS@ }; }
     set https_ports { type inet_service; elements = { @HTTPS_PORTS@ }; }
 
@@ -12,7 +12,7 @@ table inet claude_at {
 
         ip daddr 127.0.0.1 tcp dport @HTTP@ counter redirect to :18081
         ip daddr 127.0.0.1 tcp dport @SOCKS@ counter redirect to :11081
-        ip daddr 127.97.0.1 meta l4proto tcp counter redirect to :15443
+        ip daddr @CLAUDE_DNS_ALIAS@ meta l4proto tcp counter redirect to :15443
         ip daddr @v4 meta l4proto tcp counter redirect to :15443
         ip6 daddr @v6 meta l4proto tcp counter redirect to :15443
 
@@ -24,7 +24,7 @@ table inet claude_at {
 
     chain no_bypass {
         type filter hook output priority filter - 10; policy accept;
-        ip daddr 127.97.0.1 counter reject with icmpx type port-unreachable
+        ip daddr @CLAUDE_DNS_ALIAS@ counter reject with icmpx type port-unreachable
         ip daddr @v4 counter reject with icmpx type admin-prohibited
         ip6 daddr @v6 counter reject with icmpx type admin-prohibited
 

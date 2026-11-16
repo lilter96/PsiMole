@@ -1,3 +1,4 @@
+use crate::web::{ANTHROPIC_V4, ANTHROPIC_V6, CLAUDE_DNS_ALIAS};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
@@ -15,7 +16,8 @@ const BACKENDS: [(&str, &str); 2] = [
 
 // A separate kernel ruleset from nftables. The filter runs after OUTPUT
 // destination NAT, so the old public proxy addresses keep working when
-// redirected to Rust, but cannot reach the original listeners after a flush.
+// redirected to Rust. If the nftables rule disappears, keep Psiphon's raw
+// listeners, the DNS alias and Anthropic's dedicated networks closed.
 pub fn protect(socks: u16, http: u16, gid: u32) -> io::Result<()> {
     if socks == 0 || http == 0 || socks == http || gid == 0 {
         return Err(io::ErrorKind::InvalidInput.into());
@@ -24,17 +26,30 @@ pub fn protect(socks: u16, http: u16, gid: u32) -> io::Result<()> {
         "-A {CHAIN} -p tcp -m addrtype --dst-type LOCAL -m multiport --dports {socks},{http} \
          -m owner ! --gid-owner {gid} -j REJECT --reject-with tcp-reset"
     );
-    update(Some(&rule))
+    let alias = CLAUDE_DNS_ALIAS.to_string();
+    let direct_rule = |address: &str| format!("\n-A {CHAIN} -d {address} -j REJECT");
+    let v4 = rule.clone()
+        + &std::iter::once(alias.as_str())
+            .chain(ANTHROPIC_V4.iter().copied())
+            .map(direct_rule)
+            .collect::<String>();
+    let v6 = rule
+        + &ANTHROPIC_V6
+            .iter()
+            .copied()
+            .map(direct_rule)
+            .collect::<String>();
+    update([Some(&v4), Some(&v6)])
 }
 
 pub fn remove() -> io::Result<()> {
-    update(None)
+    update([None, None])
 }
 
-fn update(rule: Option<&str>) -> io::Result<()> {
+fn update(rules: [Option<&str>; 2]) -> io::Result<()> {
     // Prepare and syntax-check both families before changing either one.
     let mut transactions = Vec::new();
-    for (list, restore) in BACKENDS {
+    for ((list, restore), rule) in BACKENDS.into_iter().zip(rules) {
         let result = Command::new(list)
             .args(["-w", "5", "-t", "filter", "-S"])
             .output()?;

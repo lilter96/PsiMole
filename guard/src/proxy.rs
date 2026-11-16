@@ -20,10 +20,9 @@ use std::os::unix::net::{SocketAddr as LocalAddr, UnixDatagram};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, copy_bidirectional};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, lookup_host};
 use tokio::time::timeout;
 
-const ALIAS: Ipv4Addr = Ipv4Addr::new(127, 97, 0, 1);
 const DOMAINS: &str = "/etc/claude-at/domains.txt";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const HELLO_TIMEOUT: Duration = Duration::from_secs(4);
@@ -82,7 +81,7 @@ impl Target {
     }
 
     fn synthetic(&self) -> bool {
-        self.ip() == Some(IpAddr::V4(ALIAS))
+        self.ip() == Some(IpAddr::V4(web::CLAUDE_DNS_ALIAS))
     }
 }
 
@@ -100,6 +99,23 @@ struct Proxy {
     domains: Vec<String>,
 }
 
+fn in_domain(host: &str, domain: &str) -> bool {
+    host == domain
+        || host
+            .strip_suffix(domain)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+async fn name_matches_peer(target: &Target, name: &str) -> bool {
+    let Some(ip) = target.ip() else {
+        return false;
+    };
+    match timeout(HELLO_TIMEOUT, lookup_host((name, target.port))).await {
+        Ok(Ok(mut addresses)) => addresses.any(|address| address.ip().to_canonical() == ip),
+        _ => false,
+    }
+}
+
 impl Proxy {
     fn protected(&self, host: &str) -> bool {
         let host = host.trim_end_matches('.').to_ascii_lowercase();
@@ -107,23 +123,14 @@ impl Proxy {
             if let Some(exact) = domain.strip_prefix('=') {
                 host == exact
             } else {
-                host == *domain
-                    || host
-                        .strip_suffix(domain)
-                        .is_some_and(|prefix| prefix.ends_with('.'))
+                in_domain(&host, domain)
             }
         })
     }
 
     fn protected_target(&self, target: &Target) -> bool {
         if let Some(address) = target.ip() {
-            return match address {
-                IpAddr::V4(a) => matches!(
-                    a.octets(),
-                    [160, 79, 104..=105, _] | [153, 61, 224..=227, _]
-                ),
-                IpAddr::V6(a) => matches!(a.segments(), [0x2607, 0x6bc0, 0, ..]),
-            };
+            return web::anthropic_ip(address);
         }
         self.protected(&target.host)
     }
@@ -184,13 +191,19 @@ impl Proxy {
                 // ECH can advertise an unrelated outer name. For an explicit
                 // proxy request carrying the same DNS name, that name is also
                 // available independently of TLS (including ECH GREASE).
-                let hidden = announced.ech
-                    && (!proxy
-                        || target.ip().is_some()
-                        || target.host != name
-                        || name == "cloudflare-ech.com"
-                        || name == "cloudflare-ech.net");
-                austria = named || hidden || numeric_name;
+                let shared_name =
+                    matches!(name.as_str(), "cloudflare-ech.com" | "cloudflare-ech.net");
+                let hidden = !named
+                    && !numeric_name
+                    && announced.ech
+                    && (shared_name
+                        || if proxy {
+                            target.ip().is_some() || target.host != name
+                        } else {
+                            target.ip().is_some_and(web::shared_web_edge)
+                                || !name_matches_peer(&target, &name).await
+                        });
+                austria = named || numeric_name || hidden;
                 if target.synthetic() {
                     if !named {
                         return Err(blocked());
@@ -206,6 +219,34 @@ impl Proxy {
         let (mut remote, _permit) = self.dial(&target, proxy, austria).await?;
         remote.write_all(&prefix).await?;
         copy_bidirectional(&mut client, &mut remote).await?;
+        Ok(())
+    }
+
+    async fn redirected(self: &Arc<Self>, mut client: TcpStream) -> io::Result<()> {
+        let address = original_destination(&client)?;
+        if address == client.local_addr()? {
+            return Err(invalid());
+        }
+        let target = Target::from(address);
+        if !web::is_web_port(address.port()) {
+            return self.stream(client, target, false).await;
+        }
+        let mut prefix = Vec::new();
+        let protocol =
+            timeout(HELLO_TIMEOUT, connection_protocol(&mut client, &mut prefix)).await??;
+        let (reader, writer) = tokio::io::split(client);
+        let mut client = tokio::io::join(Cursor::new(prefix).chain(reader), writer);
+        match protocol {
+            Protocol::Http => self.serve_http(client, false, Some(address)).await,
+            Protocol::Tls => self.stream(client, target, false).await?,
+            Protocol::Other => {
+                // A port number alone does not make a binary stream HTTP.
+                let protected =
+                    self.protected_target(&target) || web::shared_web_edge(address.ip());
+                let (mut remote, _permit) = self.dial(&target, false, protected).await?;
+                copy_bidirectional(&mut client, &mut remote).await?;
+            }
+        }
         Ok(())
     }
 
@@ -236,6 +277,9 @@ impl Proxy {
         strict: bool,
         original: Option<SocketAddr>,
     ) -> io::Result<Response<Body>> {
+        if req.headers().get_all(HOST).iter().count() > 1 {
+            return Err(invalid());
+        }
         let uri_host = req.uri().authority().map(Authority::as_str);
         let header_host = req.headers().get(HOST).and_then(|host| host.to_str().ok());
         if req.method() == Method::CONNECT {
@@ -304,7 +348,7 @@ impl Proxy {
 
     async fn serve_http(
         self: &Arc<Self>,
-        stream: TcpStream,
+        stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
         strict: bool,
         original: Option<SocketAddr>,
     ) {
@@ -457,6 +501,48 @@ async fn socks_connect(stream: &mut TcpStream, target: &Target) -> io::Result<()
 struct AnnouncedHost {
     name: String,
     ech: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Protocol {
+    Http,
+    Tls,
+    Other,
+}
+
+async fn connection_protocol(
+    reader: &mut (impl AsyncRead + Unpin),
+    prefix: &mut Vec<u8>,
+) -> io::Result<Protocol> {
+    let first = reader.read_u8().await?;
+    prefix.push(first);
+    if first == 22 {
+        let mut version = [0; 2];
+        reader.read_exact(&mut version).await?;
+        prefix.extend(version);
+        return Ok(if version[0] == 3 && version[1] <= 4 {
+            Protocol::Tls
+        } else {
+            Protocol::Other
+        });
+    }
+    if matches!(first, b'\r' | b'\n' | b'\t' | b' ') {
+        return Ok(Protocol::Http);
+    }
+    let mut byte = first;
+    // A request starts with an RFC 9110 method token and a space.
+    // Long method tokens are left to the HTTP parser.
+    while prefix.len() <= 32 {
+        if byte == b' ' {
+            return Ok(Protocol::Http);
+        }
+        if !byte.is_ascii_alphanumeric() && !b"!#$%&'*+-.^`_|~".contains(&byte) {
+            return Ok(Protocol::Other);
+        }
+        byte = reader.read_u8().await?;
+        prefix.push(byte);
+    }
+    Ok(Protocol::Http)
 }
 
 async fn request_host(
@@ -614,20 +700,7 @@ pub async fn serve(gate: Arc<Gate>) -> io::Result<()> {
                         }
                         Inbound::Http { strict } => proxy.serve_http(stream, strict, None).await,
                         Inbound::Direct => {
-                            if let Ok(addr) = original_destination(&stream) {
-                                let mut first = [0];
-                                let http = web::is_web_port(addr.port())
-                                    && matches!(
-                                        timeout(HELLO_TIMEOUT, stream.peek(&mut first)).await,
-                                        Ok(Ok(1))
-                                    )
-                                    && first[0] != 22;
-                                if http {
-                                    proxy.serve_http(stream, false, Some(addr)).await;
-                                } else if addr != stream.local_addr().unwrap_or(addr) {
-                                    let _ = proxy.stream(stream, Target::from(addr), false).await;
-                                }
-                            }
+                            let _ = proxy.redirected(stream).await;
                         }
                     }
                 });
@@ -651,4 +724,30 @@ fn signal_ready() -> io::Result<()> {
     };
     UnixDatagram::unbound()?.send_to_addr(b"READY=1", &addr)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn recognizes_web_prefaces_and_preserves_binary_bytes() {
+        for (bytes, protocol) in [
+            (&b"GET / HTTP/1.1\r\n"[..], Protocol::Http),
+            (&b"MKCOL /folder HTTP/1.1\r\n"[..], Protocol::Http),
+            (&b"\r\nGET / HTTP/1.1\r\n"[..], Protocol::Http),
+            (&b"\x16\x03\x01\0\x20"[..], Protocol::Tls),
+            (&b"\x16\x01\x02\x03\x04"[..], Protocol::Other),
+            (&b"\x01\x02\xff"[..], Protocol::Other),
+        ] {
+            let mut stream = Cursor::new(bytes);
+            let mut prefix = Vec::new();
+            assert_eq!(
+                connection_protocol(&mut stream, &mut prefix).await.unwrap(),
+                protocol
+            );
+            stream.read_to_end(&mut prefix).await.unwrap();
+            assert_eq!(prefix, bytes);
+        }
+    }
 }

@@ -159,6 +159,13 @@ fn trace(url: &str, proxy: SocketAddr) -> Option<String> {
         .then(|| String::from_utf8(result.stdout).ok())?
 }
 
+fn db_ip_country(report: &str, ip: IpAddr) -> Option<String> {
+    let report: Value = serde_json::from_str(report).ok()?;
+    let reported_ip: IpAddr = report["ipAddress"].as_str()?.parse().ok()?;
+    let country = report["countryCode"].as_str()?;
+    (reported_ip == ip && country_code(country)).then(|| country.to_owned())
+}
+
 #[derive(Clone)]
 pub struct Approval {
     revision: u64,
@@ -285,6 +292,19 @@ impl Gate {
         state.watching && state.revision == revision
     }
 
+    fn independent_country(&self, revision: u64, ip: IpAddr) -> Option<String> {
+        if let Some(country) = trace(&format!("https://ipinfo.io/{ip}/country"), self.socks) {
+            return Some(country.trim().to_owned());
+        }
+        // A transport failure has no country to compare. Keep a successful
+        // primary answer authoritative, including when it disagrees.
+        if !self.verifying(revision) {
+            return None;
+        }
+        let report = trace(&format!("https://api.db-ip.com/v2/free/{ip}"), self.socks)?;
+        db_ip_country(&report, ip)
+    }
+
     fn verify_exit(
         &self,
         revision: u64,
@@ -309,8 +329,7 @@ impl Gate {
                 && *country == connection.country
                 && checked.elapsed() < GEO_CACHE_LIFETIME
         }) {
-            let country = trace(&format!("https://ipinfo.io/{ip}/country"), self.socks)?;
-            if country.trim() != connection.country {
+            if self.independent_country(revision, ip)? != connection.country {
                 return None;
             }
             *cache = Some((ip, connection.country.clone(), Instant::now()));
@@ -466,6 +485,18 @@ mod tests {
         assert!(notices(&[UP, AT, two, DE]).is_none());
         assert!(notices(&[UP, AT, exiting]).is_none());
         assert!(notices(&[UP, AT, r#"{"noticeType":"Tunnels"#]).is_none());
+    }
+
+    #[test]
+    fn secondary_country_must_belong_to_the_same_ip() {
+        let ip = "2001:db8::1".parse().unwrap();
+        let report = r#"{"ipAddress":"2001:db8:0:0::1","countryCode":"AT"}"#;
+        assert_eq!(db_ip_country(report, ip).as_deref(), Some("AT"));
+        assert_eq!(db_ip_country(report, "2001:db8::2".parse().unwrap()), None);
+        assert_eq!(
+            db_ip_country(r#"{"ipAddress":"2001:db8::1","countryCode":"?"}"#, ip),
+            None
+        );
     }
 
     #[test]

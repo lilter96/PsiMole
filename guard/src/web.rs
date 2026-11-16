@@ -1,3 +1,10 @@
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::LazyLock;
+
+pub const CLAUDE_DNS_ALIAS: Ipv4Addr = Ipv4Addr::new(127, 97, 0, 1);
+pub const ANTHROPIC_V4: &[&str] = &["160.79.104.0/23", "153.61.224.0/22"];
+pub const ANTHROPIC_V6: &[&str] = &["2607:6bc0::/48"];
+
 // Default HTTP(S) ports supported by the shared CDN, including the
 // nonstandard ports. The nftables redirect and proxy use the same list.
 pub const HTTP_PORTS: &[u16] = &[80, 2052, 2082, 2086, 2095, 8080, 8880];
@@ -9,6 +16,51 @@ pub fn ports() -> impl Iterator<Item = u16> {
 
 pub fn is_web_port(port: u16) -> bool {
     ports().any(|candidate| candidate == port)
+}
+
+pub fn anthropic_ip(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(ip) => matches!(
+            ip.octets(),
+            [160, 79, 104..=105, _] | [153, 61, 224..=227, _]
+        ),
+        IpAddr::V6(ip) => matches!(ip.segments(), [0x2607, 0x6bc0, 0, ..]),
+    }
+}
+
+struct Network {
+    prefix: u128,
+    shift: u32,
+}
+
+fn address_bits(ip: IpAddr) -> u128 {
+    match ip {
+        IpAddr::V4(ip) => u128::from(ip.to_ipv6_mapped()),
+        IpAddr::V6(ip) => u128::from(ip),
+    }
+}
+
+pub fn shared_web_edge(ip: IpAddr) -> bool {
+    static NETWORKS: LazyLock<Vec<Network>> = LazyLock::new(|| {
+        include_str!("../assets/cloudflare-edges.txt")
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let (address, length) = line.split_once('/').expect("web edge CIDR");
+                let address: IpAddr = address.parse().expect("web edge address");
+                let length: u32 = length.parse().expect("web edge prefix length");
+                let shift = if address.is_ipv4() { 32 } else { 128 } - length;
+                Network {
+                    prefix: address_bits(address) >> shift,
+                    shift,
+                }
+            })
+            .collect()
+    });
+    let address = address_bits(ip);
+    NETWORKS
+        .iter()
+        .any(|network| address >> network.shift == network.prefix)
 }
 
 // Rustls exposes the outer server name but not unknown ClientHello
@@ -83,5 +135,15 @@ mod tests {
         assert_eq!(has_ech(&fragmented_hello([0xfe, 0x0d])), Some(true));
         assert_eq!(has_ech(&fragmented_hello([0x00, 0x0d])), Some(false));
         assert_eq!(has_ech(&[22, 3, 3, 0, 20, 1]), None);
+    }
+
+    #[test]
+    fn shared_edges_cover_both_families_and_mapped_addresses() {
+        for address in ["104.18.41.41", "::ffff:172.64.0.1", "2a06:98c1::1"] {
+            assert!(shared_web_edge(address.parse().unwrap()), "{address}");
+        }
+        for address in ["104.28.0.1", "198.18.0.1", "2001:db8::1"] {
+            assert!(!shared_web_edge(address.parse().unwrap()), "{address}");
+        }
     }
 }

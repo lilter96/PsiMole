@@ -6,8 +6,11 @@ desktop account and needs root to install the firewall and DNS policy. The
 main GNOME extension and Psiphon must already be installed.
 
 Build as your normal desktop user, then install the guard. Replace `AT` with the
-country you want to allow. `--firefox` is optional. It locks Firefox to the
-guard's SOCKS listener on `127.0.0.1:11081` and requires an available Firefox policy slot.
+country you want to allow. `--firefox` is optional and requires an available
+Firefox policy slot. Firefox keeps its connection modes and proxy addresses.
+The managed exceptions send protected destinations to the local guard in both
+**No proxy** and **Manual proxy configuration**. Ordinary destinations follow
+the browser's selected mode.
 
 ```sh
 cargo build --release --locked --manifest-path guard/Cargo.toml
@@ -28,22 +31,26 @@ request a fresh check, select the same country in the Claude row.
 The guard watches Psiphon's configuration, notices and process exit with Linux
 inotify and pidfd. It closes active protected TCP connections when it loses the
 approved tunnel. Every reconnect needs a fresh connected-region notice and
-an HTTPS check of the exit IP. A new IP is also checked with IPinfo. There is
-no recurring network probe while a tunnel stays connected.
+an HTTPS check of the exit IP. A new IP is also checked with IPinfo, or DB-IP
+when IPinfo is unavailable. There is no recurring network probe while a tunnel
+stays connected.
 
 The firewall redirects applications configured for Psiphon's original proxy
-ports to the guard. A separate `iptables-legacy` OUTPUT rule rejects access
-to the raw listeners from sockets outside the guard group, including if
-`nft flush ruleset` removes the redirect. Firefox configured with `--firefox`
-and the guarded Claude Code launcher already connect directly to the guard.
+ports to the guard. Independent legacy OUTPUT rules protect the raw listeners,
+the guard's DNS alias, and Anthropic's dedicated networks if `nft flush ruleset`
+removes the redirects. The guarded Claude Code launcher connects directly to
+the guard.
 
 For native apps the firewall
 uses locally resolved names, Anthropic's published inbound IP blocks, and
 the hostname in HTTP or TLS to recognize requests with cached or alternate DNS,
 including the [standard and alternate CDN web ports](https://developers.cloudflare.com/fundamentals/reference/network-ports/).
-Connections without a usable name on these ports require a verified exit.
-An encrypted hello with an IP destination also requires a verified exit.
-UDP to the covered HTTPS ports is rejected for the protected account.
+Actual HTTP and TLS connections are inspected by their headers. Opaque
+connections and encrypted hellos to the configured shared CDN networks need a
+verified exit. On other networks, a visible name in an encrypted hello must
+resolve to the peer before the guard allows a direct connection. Other TCP
+protocols can connect directly to ordinary addresses. UDP to the covered HTTPS
+ports is rejected for the protected account.
 Separate containers, remote tunnels, arbitrary third-party gateways and direct
 traffic outside these ports to shared addresses require their own routing policy.
 

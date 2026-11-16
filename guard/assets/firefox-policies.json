@@ -1,12 +1,5 @@
 {
   "policies": {
-    "Proxy": {
-      "Mode": "manual",
-      "Locked": true,
-      "SOCKSProxy": "127.0.0.1:11081",
-      "SOCKSVersion": 5,
-      "UseProxyForDNS": true
-    },
     "DNSOverHTTPS": {
       "Enabled": false,
       "Locked": true
@@ -14,6 +7,14 @@
     "Preferences": {
       "network.proxy.failover_direct": {
         "Value": false,
+        "Status": "locked"
+      },
+      "network.proxy.no_proxies_on": {
+        "Value": "",
+        "Status": "locked"
+      },
+      "security.tls.ech.grease_probability": {
+        "Value": 0,
         "Status": "locked"
       }
     },

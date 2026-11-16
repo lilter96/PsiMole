@@ -100,17 +100,36 @@ fn entries() -> impl Iterator<Item = &'static str> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
+fn firefox_policy() -> io::Result<Value> {
+    let mut policy: Value = serde_json::from_str(include_str!("../assets/firefox-policies.json"))
+        .map_err(io::Error::other)?;
+    let mut exceptions: Vec<_> = entries()
+        .map(|entry| entry.trim_start_matches('='))
+        .flat_map(|domain| [domain.to_owned(), format!("{domain}.")])
+        .collect();
+    exceptions.push(web::CLAUDE_DNS_ALIAS.to_string());
+    exceptions.extend(web::ANTHROPIC_V4.iter().map(|net| (*net).to_owned()));
+    for net in web::ANTHROPIC_V6 {
+        let (address, prefix) = net.split_once('/').ok_or(io::ErrorKind::InvalidData)?;
+        exceptions.push(format!("[{address}]/{prefix}"));
+    }
+    policy["policies"]["Preferences"]["network.proxy.no_proxies_on"]["Value"] =
+        json!(exceptions.join(", "));
+    Ok(policy)
+}
+
 fn dns_conf() -> String {
     let mut config = String::from(
         "port=10553\nlisten-address=169.254.227.53\nbind-interfaces\nno-resolv\nno-hosts\nno-poll\ncache-size=0\nlocal-ttl=0\n",
     );
+    let alias = web::CLAUDE_DNS_ALIAS;
     for entry in entries() {
         let domain = entry.trim_start_matches('=');
         config.push_str(&format!("local=/{domain}/\n"));
         if entry.starts_with('=') {
-            config.push_str(&format!("host-record={domain},127.97.0.1\n"));
+            config.push_str(&format!("host-record={domain},{alias}\n"));
         } else {
-            config.push_str(&format!("address=/{domain}/127.97.0.1\n"));
+            config.push_str(&format!("address=/{domain}/{alias}\n"));
         }
     }
     config
@@ -197,19 +216,23 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
             .as_bool()
             .unwrap_or(false);
     let manage_firefox = manage_firefox || previous_firefox;
-    let firefox = include_str!("../assets/firefox-policies.json");
-    if manage_firefox && Path::new(FIREFOX).exists() {
-        let current = json_file(Path::new(FIREFOX))?;
-        let wanted = serde_json::from_str::<Value>(firefox).map_err(io::Error::other)?;
-        let was_ours = previous_firefox
-            && json_file(&Path::new(ETC).join("firefox-installed.json"))
-                .is_ok_and(|installed| installed == current);
-        if current != wanted && !was_ours {
-            return Err(io::Error::other(
-                "Firefox has a managed policy from another source. Existing policy kept.",
-            ));
+    let firefox = if manage_firefox {
+        let wanted = firefox_policy()?;
+        if Path::new(FIREFOX).exists() {
+            let current = json_file(Path::new(FIREFOX))?;
+            let was_ours = previous_firefox
+                && json_file(&Path::new(ETC).join("firefox-installed.json"))
+                    .is_ok_and(|installed| installed == current);
+            if current != wanted && !was_ours {
+                return Err(io::Error::other(
+                    "Firefox has a managed policy from another source. Existing policy kept.",
+                ));
+            }
         }
-    }
+        Some(serde_json::to_vec_pretty(&wanted).map_err(io::Error::other)?)
+    } else {
+        None
+    };
 
     let gid = install_group()?;
     let ports = |ports: &mut dyn Iterator<Item = u16>| {
@@ -229,6 +252,9 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
             .replace("@HTTP@", &http.to_string())
             .replace("@WEB_PORTS@", &web_ports)
             .replace("@HTTPS_PORTS@", &https_ports)
+            .replace("@ANTHROPIC_V4@", &web::ANTHROPIC_V4.join(", "))
+            .replace("@ANTHROPIC_V6@", &web::ANTHROPIC_V6.join(", "))
+            .replace("@CLAUDE_DNS_ALIAS@", &web::CLAUDE_DNS_ALIAS.to_string())
     };
     let dir = Path::new(ETC);
     fs::create_dir_all(dir)?;
@@ -279,14 +305,10 @@ pub fn install(user: &str, region: &str, manage_firefox: bool) -> io::Result<()>
     ] {
         write(&Path::new(SYSTEMD).join(name), unit.as_bytes(), 0o644)?;
     }
-    if manage_firefox {
+    if let Some(firefox) = firefox {
         fs::create_dir_all(Path::new(FIREFOX).parent().unwrap())?;
-        write(Path::new(FIREFOX), firefox.as_bytes(), 0o644)?;
-        write(
-            &dir.join("firefox-installed.json"),
-            firefox.as_bytes(),
-            0o644,
-        )?;
+        write(Path::new(FIREFOX), &firefox, 0o644)?;
+        write(&dir.join("firefox-installed.json"), &firefox, 0o644)?;
     }
     command(
         "/usr/sbin/runuser",
@@ -379,4 +401,31 @@ pub fn remove() -> io::Result<()> {
 
 pub fn remove_policy() -> io::Result<()> {
     remove_file(&home()?.join("psiphon").join(POLICY_FILE))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firefox_keeps_proxy_settings_and_manages_protected_destinations() {
+        let policy = firefox_policy().unwrap();
+        let policies = policy["policies"].as_object().unwrap();
+        assert!(!policies.contains_key("Proxy"));
+        let prefs = policies["Preferences"].as_object().unwrap();
+        assert!(!prefs.contains_key("network.proxy.type"));
+        let exceptions = &prefs["network.proxy.no_proxies_on"];
+        assert_eq!(exceptions["Status"], "locked");
+        let exceptions: Vec<_> = exceptions["Value"].as_str().unwrap().split(", ").collect();
+        for destination in [
+            "claude.ai",
+            "claude.ai.",
+            "claude.googleapis.com",
+            "127.97.0.1",
+            "160.79.104.0/23",
+            "[2607:6bc0::]/48",
+        ] {
+            assert!(exceptions.contains(&destination), "{destination}");
+        }
+    }
 }
