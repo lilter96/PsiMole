@@ -48,8 +48,9 @@ has a separate Linux firewall and DNS setup.
 ## Speed
 
 Click **Measure speed** while connected to measure aggregate throughput over
-four HTTPS connections to Cloudflare through the regular Psiphon proxy. Each
-direction transfers 32 MB. Compare results across several runs on the same
+four HTTPS connections to Cloudflare through the regular Psiphon proxy. The
+test starts with 4 MB and sends another 32 MB on faster connections in each
+direction. Compare results across several runs on the same
 network and exit country. The selected Psiphon server, the network route, and
 Psiphon's traffic limits affect the measured throughput.
 

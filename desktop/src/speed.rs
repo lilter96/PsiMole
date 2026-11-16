@@ -5,7 +5,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const STREAMS: usize = 4;
+const PILOT_BYTES: u64 = 1_000_000;
 const SAMPLE_BYTES: u64 = 8_000_000;
+const SAMPLE_THRESHOLD_MBPS: f64 = 16.0;
 const DOWNLOAD_URL: &str = "https://speed.cloudflare.com/__down";
 const UPLOAD_URL: &str = "https://speed.cloudflare.com/__up";
 
@@ -36,22 +38,17 @@ pub fn measure(route: Route, still_connected: impl Fn() -> bool + Sync) -> io::R
     }
     let client = builder.build().map_err(io::Error::other)?;
 
-    let down_mbps = measure_phase(&still_connected, || {
-        let response = require_success(
-            client
-                .get(DOWNLOAD_URL)
-                .query(&[("bytes", SAMPLE_BYTES)])
-                .send(),
-        )?;
-        let bytes = io::copy(&mut response.take(SAMPLE_BYTES + 1), &mut io::sink())?;
-        if bytes != SAMPLE_BYTES {
+    let down_mbps = measure_direction(&still_connected, |size| {
+        let response = require_success(client.get(DOWNLOAD_URL).query(&[("bytes", size)]).send())?;
+        let bytes = io::copy(&mut response.take(size + 1), &mut io::sink())?;
+        if bytes != size {
             return Err(io::Error::other("Incomplete download sample"));
         }
-        Ok(bytes)
+        Ok(())
     })?;
 
-    let up_mbps = measure_phase(&still_connected, || {
-        let body = Body::sized(io::repeat(0).take(SAMPLE_BYTES), SAMPLE_BYTES);
+    let up_mbps = measure_direction(&still_connected, |size| {
+        let body = Body::sized(io::repeat(0).take(size), size);
         require_success(
             client
                 .post(UPLOAD_URL)
@@ -59,10 +56,28 @@ pub fn measure(route: Route, still_connected: impl Fn() -> bool + Sync) -> io::R
                 .body(body)
                 .send(),
         )?;
-        Ok(SAMPLE_BYTES)
+        Ok(())
     })?;
 
     Ok(Speed { down_mbps, up_mbps })
+}
+
+fn measure_direction(
+    still_connected: &(impl Fn() -> bool + Sync),
+    transfer: impl Fn(u64) -> io::Result<()> + Sync,
+) -> io::Result<f64> {
+    let run_sample = |size| {
+        measure_phase(still_connected, || {
+            transfer(size)?;
+            Ok(size)
+        })
+    };
+    let initial = run_sample(PILOT_BYTES)?;
+    if initial >= SAMPLE_THRESHOLD_MBPS {
+        run_sample(SAMPLE_BYTES)
+    } else {
+        Ok(initial)
+    }
 }
 
 fn require_success(response: reqwest::Result<Response>) -> io::Result<Response> {
