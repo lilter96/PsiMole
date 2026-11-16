@@ -75,12 +75,48 @@ jobs:
         run: |
           Add-Type @'
           using System;
+          using System.Collections.Generic;
           using System.Runtime.InteropServices;
+          using System.Text;
           public static class DesktopWindow {
+              private delegate bool WindowCallback(IntPtr window, IntPtr parameter);
+              [DllImport("user32.dll")]
+              private static extern bool EnumWindows(WindowCallback callback, IntPtr parameter);
+              [DllImport("user32.dll")]
+              private static extern uint GetWindowThreadProcessId(IntPtr window, out int processId);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+              private static extern int GetWindowText(IntPtr window, StringBuilder title, int capacity);
               [DllImport("user32.dll")]
               public static extern bool IsWindowVisible(IntPtr window);
               [DllImport("user32.dll", SetLastError = true)]
               public static extern bool PostMessageW(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
+
+              public static IntPtr FindPsiMole(int processId) {
+                  IntPtr result = IntPtr.Zero;
+                  EnumWindows((window, _) => {
+                      GetWindowThreadProcessId(window, out int owner);
+                      if (processId != owner || !IsWindowVisible(window)) return true;
+                      var title = new StringBuilder(256);
+                      GetWindowText(window, title, title.Capacity);
+                      if (title.ToString() != "PsiMole") return true;
+                      result = window;
+                      return false;
+                  }, IntPtr.Zero);
+                  return result;
+              }
+
+              public static string Describe(int processId) {
+                  var windows = new List<string>();
+                  EnumWindows((window, _) => {
+                      GetWindowThreadProcessId(window, out int owner);
+                      if (processId != owner) return true;
+                      var title = new StringBuilder(256);
+                      GetWindowText(window, title, title.Capacity);
+                      windows.Add($"{window} visible={IsWindowVisible(window)} title='{title}'");
+                      return true;
+                  }, IntPtr.Zero);
+                  return string.Join(", ", windows);
+              }
           }
           '@
 
@@ -101,11 +137,11 @@ jobs:
           if (!(Test-Path $shortcut)) { throw 'Start menu shortcut missing' }
 
           $app = Start-Process -FilePath $exe -PassThru
-          Wait-For { $app.Refresh(); !$app.HasExited -and $app.MainWindowHandle -ne 0 } 'Window failed to open'
+          Wait-For { [DesktopWindow]::FindPsiMole($app.Id) -ne [IntPtr]::Zero } 'Window failed to open'
           $startupLog = Join-Path $env:LOCALAPPDATA 'PsiMole\startup-error.txt'
           if (Test-Path $startupLog) { throw (Get-Content -Raw $startupLog) }
-          $window = $app.MainWindowHandle
-          if (![DesktopWindow]::IsWindowVisible($window)) { throw 'Main window started hidden' }
+          $window = [DesktopWindow]::FindPsiMole($app.Id)
+          Write-Host "Testing PsiMole process $($app.Id), window $window"
           for ($cycle = 1; $cycle -le 8; $cycle++) {
             if (![DesktopWindow]::PostMessageW($window, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) {
               throw "Could not send WM_CLOSE ($([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
@@ -121,7 +157,11 @@ jobs:
               throw "Second launch did not acknowledge the window on cycle $cycle"
             }
             if ($second.ExitCode -ne 0) { throw "Second launch failed on cycle $cycle" }
-            Wait-For { !$app.HasExited -and [DesktopWindow]::IsWindowVisible($window) } "Second launch did not restore the same window on cycle $cycle"
+            $app.Refresh()
+            Write-Host "Cycle $cycle, app exited=$($app.HasExited), windows: $([DesktopWindow]::Describe($app.Id))"
+            Wait-For {
+              [DesktopWindow]::FindPsiMole($app.Id) -eq $window
+            } "Second launch did not restore the same window on cycle $cycle"
           }
           $quit = Start-Process -FilePath $exe -ArgumentList '--quit-if-running' -PassThru -Wait
           if ($quit.ExitCode -ne 0 -or !$app.WaitForExit(10000)) { throw 'Quit did not stop the app' }
