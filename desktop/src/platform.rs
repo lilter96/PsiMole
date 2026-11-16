@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, FILETIME, GlobalFree, HANDLE, WAIT_OBJECT_0,
+    ERROR_FILE_NOT_FOUND, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, WAIT_OBJECT_0,
+    WPARAM,
 };
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Networking::WinInet::*;
@@ -19,8 +20,9 @@ use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW,
 };
 use windows_sys::Win32::System::Threading::*;
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SW_RESTORE, SetForegroundWindow, ShowWindowAsync,
+    SW_HIDE, SW_RESTORE, SetForegroundWindow, ShowWindow, ShowWindowAsync, WM_CLOSE,
 };
 
 fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
@@ -152,6 +154,41 @@ pub fn show_window(hwnd: isize) {
         ShowWindowAsync(hwnd, SW_RESTORE);
         SetForegroundWindow(hwnd);
     }
+}
+
+pub struct HideOnClose(HWND);
+
+impl HideOnClose {
+    pub fn install(hwnd: isize) -> io::Result<Self> {
+        let hwnd = hwnd as HWND;
+        win32(unsafe { SetWindowSubclass(hwnd, Some(hide_on_close), 1, 0) })?;
+        Ok(Self(hwnd))
+    }
+}
+
+impl Drop for HideOnClose {
+    fn drop(&mut self) {
+        unsafe {
+            RemoveWindowSubclass(self.0, Some(hide_on_close), 1);
+        }
+    }
+}
+
+unsafe extern "system" fn hide_on_close(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    if message == WM_CLOSE {
+        unsafe {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+        return 0;
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 pub fn default_russian() -> bool {

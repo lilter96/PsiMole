@@ -33,7 +33,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             let commands = platform::WindowCommands::new(&dir)?;
             if let Some(_lock) = platform::try_instance(&dir)? {
-                ui::run(dir, commands)?;
+                let log = dir.join("startup-error.txt");
+                let _ = std::fs::remove_file(&log);
+                if let Err(error) = ui::run(dir, commands) {
+                    let _ = std::fs::write(log, error.to_string());
+                    return Err(error.into());
+                }
             } else {
                 platform::signal(&commands.show)?;
             }

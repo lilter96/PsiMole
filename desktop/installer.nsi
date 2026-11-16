@@ -30,8 +30,11 @@ InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 
 !macro StopApplication
   IfFileExists "$INSTDIR\PsiMole.exe" 0 done
+  ClearErrors
   ExecWait '"$INSTDIR\PsiMole.exe" --quit-if-running' $0
+  IfErrors failed
   IntCmp $0 0 done
+failed:
   Abort "Close PsiMole before continuing."
 done:
 !macroend
@@ -41,11 +44,12 @@ Section "PsiMole"
   SetShellVarContext current
   SetOutPath "$INSTDIR"
   File /oname=PsiMole.exe "${APP_EXE}"
+  File "assets\psimole.ico"
   File "..\LICENSE"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$SMPROGRAMS\PsiMole.lnk" "$INSTDIR\PsiMole.exe"
+  CreateShortcut "$SMPROGRAMS\PsiMole.lnk" "$INSTDIR\PsiMole.exe" "" "$INSTDIR\psimole.ico"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "PsiMole"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\PsiMole.exe"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\psimole.ico"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "PsiMole"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "HelpLink" "https://github.com/lilter96/PsiMole"
@@ -60,6 +64,7 @@ Section "Uninstall"
   SetShellVarContext current
   Delete "$SMPROGRAMS\PsiMole.lnk"
   Delete "$INSTDIR\PsiMole.exe"
+  Delete "$INSTDIR\psimole.ico"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
