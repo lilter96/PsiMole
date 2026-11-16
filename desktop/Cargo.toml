@@ -22,6 +22,7 @@ wgpu = { version = "27", default-features = false, features = ["dx12", "wgsl"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Dwm",
     "Win32_Networking_WinInet",
     "Win32_Security",
     "Win32_System_JobObjects",

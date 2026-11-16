@@ -1,26 +1,16 @@
 use crate::platform::{self, WindowCommands, WindowVisibility};
-use crate::runtime::{Action, ClientHandle, Phase, Protection, Snapshot, SpeedTest};
-use eframe::egui::{
-    self, Align, Color32, ComboBox, Context, Frame, Layout, Margin, RichText, Stroke, Vec2,
-    ViewportCommand,
-};
-use psimole::tunnel::Service;
+use crate::runtime::{ClientHandle, Snapshot};
+use eframe::egui::{self, Context, Frame, Margin, ViewportCommand};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-const BACKGROUND: Color32 = Color32::from_rgb(19, 27, 24);
-const SURFACE: Color32 = Color32::from_rgb(32, 44, 38);
-const BORDER: Color32 = Color32::from_rgb(56, 73, 64);
-const TEXT: Color32 = Color32::from_rgb(247, 239, 220);
-const MUTED: Color32 = Color32::from_rgb(166, 187, 171);
-const MINT: Color32 = Color32::from_rgb(121, 225, 157);
-const AMBER: Color32 = Color32::from_rgb(251, 204, 108);
-const CORAL: Color32 = Color32::from_rgb(255, 162, 143);
+mod art;
+mod panel;
+mod theme;
+
 const MASCOT: &[u8] = include_bytes!("../../docs/media/psimole.png");
 
 pub fn run(dir: PathBuf, commands: WindowCommands) -> eframe::Result<()> {
@@ -35,8 +25,8 @@ pub fn run(dir: PathBuf, commands: WindowCommands) -> eframe::Result<()> {
     };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([440.0, 660.0])
-            .with_min_inner_size([366.0, 490.0])
+            .with_inner_size([376.0, 626.0])
+            .with_min_inner_size([340.0, 460.0])
             .with_icon(icon.clone()),
         vsync: true,
         renderer: eframe::Renderer::Wgpu,
@@ -152,7 +142,8 @@ impl Tray {
 struct Desktop {
     client: ClientHandle,
     state: Snapshot,
-    mascot: egui::TextureHandle,
+    art: art::Art,
+    hwnd: isize,
     tray: Option<Tray>,
     visibility: Option<WindowVisibility>,
     quit: mpsc::Receiver<()>,
@@ -167,12 +158,13 @@ impl Desktop {
         icon: egui::IconData,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let context = &creation.egui_ctx;
-        style(context);
+        theme::install(context);
         let raw = creation.window_handle()?;
         let RawWindowHandle::Win32(win32) = raw.as_raw() else {
             return Err("Expected a Win32 window".into());
         };
         let hwnd = win32.hwnd.get();
+        platform::apply_window_theme(hwnd, theme::BACKGROUND.to_array(), theme::TEXT.to_array());
         let (client, state) = ClientHandle::start(dir, context.clone())?;
         let (request_quit, quit) = mpsc::channel();
         let close = {
@@ -195,15 +187,11 @@ impl Desktop {
                     .unwrap_or_else(platform::default_russian),
             ));
         }
-        let mascot = context.load_texture(
-            "psimole",
-            egui::ColorImage::from(&icon),
-            egui::TextureOptions::LINEAR,
-        );
         Ok(Self {
             client,
             state,
-            mascot,
+            art: art::Art::new(context),
+            hwnd,
             tray,
             visibility,
             quit,
@@ -218,281 +206,6 @@ impl Desktop {
                 .russian
                 .unwrap_or_else(platform::default_russian),
         )
-    }
-
-    fn status(&self, ui: &mut egui::Ui, language: Language) {
-        let phase = self.state.phase;
-        let (status, accent) = match phase {
-            Phase::Off => (language.text("Tunnel closed", "Туннель закрыт"), MUTED),
-            Phase::Preparing => (
-                language.text("Preparing Psiphon…", "Подготовка Psiphon…"),
-                AMBER,
-            ),
-            Phase::Connecting => (
-                language.text("Opening tunnel…", "Открываем туннель…"),
-                AMBER,
-            ),
-            Phase::Connected => (language.text("Tunnel open", "Туннель открыт"), MINT),
-            Phase::Reconnecting => (language.text("Reconnecting…", "Переподключаемся…"), AMBER),
-            Phase::Failed => (
-                language.text("Tunnel unavailable", "Туннель недоступен"),
-                CORAL,
-            ),
-        };
-        ui.vertical_centered(|ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::splat(132.0), egui::Sense::hover());
-            let painter = ui.painter();
-            painter.circle_filled(rect.center(), 64.0, Color32::from_rgb(25, 41, 33));
-            painter.circle_stroke(rect.center(), 64.0, Stroke::new(2.0_f32, accent));
-            painter.image(
-                self.mascot.id(),
-                rect.shrink(11.0),
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
-            ui.add_space(9.0);
-            ui.label(RichText::new(status).size(26.0).strong());
-            if let Some(country) = &self.state.tunnel.region {
-                let seconds = self
-                    .state
-                    .tunnel
-                    .connected_at
-                    .map_or(0, |since| since.elapsed().as_secs());
-                ui.label(
-                    RichText::new(format!(
-                        "{}  ·  {:02}:{:02}:{:02}",
-                        language.country(country),
-                        seconds / 3600,
-                        seconds / 60 % 60,
-                        seconds % 60
-                    ))
-                    .color(accent),
-                );
-                ui.ctx().request_repaint_after(Duration::from_secs(1));
-            } else {
-                ui.label(
-                    RichText::new(language.country(&self.state.settings.region)).color(accent),
-                );
-            }
-        });
-        ui.add_space(10.0);
-        let running = !matches!(phase, Phase::Off | Phase::Failed);
-        let label = if running {
-            language.text("Disconnect", "Отключить")
-        } else {
-            language.text("Connect", "Подключить")
-        };
-        let button = egui::Button::new(RichText::new(label).size(17.0).strong().color(BACKGROUND))
-            .fill(if running { TEXT } else { MINT })
-            .corner_radius(13);
-        if ui.add_sized([ui.available_width(), 42.0], button).clicked() {
-            self.client.send(if running {
-                Action::Disconnect
-            } else {
-                Action::Connect
-            });
-        }
-        if let Some(error) = &self.state.error {
-            ui.label(RichText::new(error).color(CORAL));
-        }
-        if phase == Phase::Connected {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "↓ {}",
-                        byte_rate(self.state.tunnel.received, language)
-                    ))
-                    .color(MINT),
-                );
-                ui.label(
-                    RichText::new(format!("↑ {}", byte_rate(self.state.tunnel.sent, language)))
-                        .color(MUTED),
-                );
-            });
-            ui.horizontal(|ui| {
-                let running = matches!(self.state.speed, SpeedTest::Running);
-                let label = if running {
-                    language.text("Measuring…", "Замеряем…")
-                } else {
-                    language.text("Measure speed", "Измерить скорость")
-                };
-                if ui
-                    .add_enabled(!running, egui::Button::new(label))
-                    .on_hover_text(language.text(
-                        "Uses four connections through this tunnel and transfers up to 36 MB in each direction.",
-                        "Замеряет скорость через текущий туннель на четырёх соединениях. До 36 МБ в каждую сторону.",
-                    ))
-                    .clicked()
-                {
-                    self.client.send(Action::Measure);
-                }
-                match self.state.speed {
-                    SpeedTest::Measured(result) => {
-                        ui.label(
-                            RichText::new(format!(
-                                "↓ {:.1}   ↑ {:.1} {}",
-                                result.down_mbps,
-                                result.up_mbps,
-                                language.text("Mbps", "Мбит/с")
-                            ))
-                            .color(MINT),
-                        );
-                    }
-                    SpeedTest::Failed => {
-                        ui.label(
-                            RichText::new(language.text("Could not measure", "Замер не удался"))
-                                .color(CORAL),
-                        );
-                    }
-                    _ => {}
-                }
-            });
-        }
-    }
-
-    fn settings(&self, ui: &mut egui::Ui, language: Language) {
-        let mut countries: BTreeSet<&str> = self.state.regions.iter().map(String::as_str).collect();
-        countries.insert(self.state.settings.region.as_str());
-        countries.extend(
-            Service::ALL
-                .into_iter()
-                .filter_map(|service| self.state.settings.countries.get(service)),
-        );
-        card(ui, |ui| {
-            row(
-                ui,
-                language.text("Exit country", "Страна выхода"),
-                |ui| {
-                    let mut selected = self.state.settings.region.as_str();
-                    ComboBox::from_id_salt("exit")
-                        .width(148.0)
-                        .selected_text(language.country(selected))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut selected, "", language.country(""));
-                            for country in countries
-                                .iter()
-                                .copied()
-                                .filter(|country| !country.is_empty())
-                            {
-                                ui.selectable_value(
-                                    &mut selected,
-                                    country,
-                                    language.country(country),
-                                );
-                            }
-                        });
-                    if selected != self.state.settings.region {
-                        self.client.send(Action::Region(selected.to_owned()));
-                    }
-                },
-            );
-            ui.separator();
-            row(
-                ui,
-                language.text("System proxy", "Системный прокси"),
-                |ui| {
-                    let mut enabled = self.state.settings.system_proxy;
-                    if ui.checkbox(&mut enabled, "").on_hover_text(language.text(
-                    "Route apps that use Windows proxy settings through Psiphon.",
-                    "Направляет через Psiphon приложения, которые используют прокси Windows.",
-                )).changed() {
-                    self.client.send(Action::SystemProxy(enabled));
-                }
-                },
-            );
-        });
-        ui.add_space(9.0);
-        card(ui, |ui| {
-            if Service::ALL
-                .into_iter()
-                .any(|service| self.state.settings.countries.get(service).is_some())
-            {
-                ui.label(
-                    RichText::new(language.text(
-                        "Country locks apply through the service proxies below.",
-                        "Блокировки работают через прокси сервисов ниже.",
-                    ))
-                    .small()
-                    .color(MUTED),
-                );
-            }
-            for (index, service) in Service::ALL.into_iter().enumerate() {
-                if index > 0 {
-                    ui.separator();
-                }
-                self.service(
-                    ui,
-                    service,
-                    self.state.protection[index],
-                    &countries,
-                    language,
-                );
-            }
-        });
-        if let (Some(http), Some(socks)) = (self.state.tunnel.http, self.state.tunnel.socks) {
-            ui.label(
-                RichText::new(format!("127.0.0.1  ·  HTTP {http}  ·  SOCKS {socks}"))
-                    .small()
-                    .color(MUTED),
-            );
-        }
-    }
-
-    fn service(
-        &self,
-        ui: &mut egui::Ui,
-        service: Service,
-        protection: Protection,
-        countries: &BTreeSet<&str>,
-        language: Language,
-    ) {
-        let current = self.state.settings.countries.get(service);
-        row(ui, service.label(), |ui| {
-            let mut option = current;
-            let off = language.text("Lock off", "Без блокировки");
-            let text = option.map_or_else(|| off.to_owned(), |country| language.country(country));
-            ComboBox::from_id_salt(service.label())
-                .width(148.0)
-                .selected_text(text)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut option, None, off);
-                    for country in countries
-                        .iter()
-                        .copied()
-                        .filter(|country| !country.is_empty())
-                    {
-                        ui.selectable_value(&mut option, Some(country), language.country(country));
-                    }
-                });
-            if option != current {
-                self.client
-                    .send(Action::Lock(service, option.map(str::to_owned)));
-            }
-        });
-        if protection == Protection::Disabled {
-            return;
-        }
-        let (label, color) = match protection {
-            Protection::Disabled => unreachable!(),
-            Protection::Blocked => (language.text("Blocked", "Доступ закрыт"), CORAL),
-            Protection::PortUnavailable => (language.text("Port unavailable", "Порт занят"), CORAL),
-            Protection::Verifying => (language.text("Verifying exit", "Проверяем страну"), AMBER),
-            Protection::Allowed => (language.text("Allowed", "Доступ разрешён"), MINT),
-        };
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(label).small().color(color));
-            if protection != Protection::PortUnavailable {
-                let address = format!("127.0.0.1:{}", service.port());
-                let display = RichText::new(&address).monospace().small().color(MUTED);
-                if ui.link(display).on_hover_text(language.text(
-                    "Copy the HTTP proxy address to use in this service's browser profile or app.",
-                    "Скопировать адрес HTTP-прокси для профиля браузера или приложения.",
-                )).clicked() {
-                    ui.ctx().copy_text(address);
-                }
-            }
-        });
     }
 }
 
@@ -519,86 +232,13 @@ impl eframe::App for Desktop {
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
-                    .fill(BACKGROUND)
-                    .inner_margin(Margin::symmetric(19, 12)),
+                    .fill(theme::BACKGROUND)
+                    .inner_margin(Margin::symmetric(14, 10)),
             )
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("PsiMole").size(17.0).strong());
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.small_button(language.text("RU", "EN")).clicked() {
-                                    self.client.send(Action::Language(!language.0));
-                                }
-                            });
-                        });
-                        ui.add_space(8.0);
-                        self.status(ui, language);
-                        ui.add_space(11.0);
-                        self.settings(ui, language);
-                        if self.tray.is_none() {
-                            ui.label(RichText::new(language.text(
-                            "The system tray is unavailable. Closing the window stops the tunnel.",
-                            "Системный трей недоступен. Закрытие окна остановит туннель.",
-                        )).small().color(AMBER));
-                        }
-                    });
+                    .show(ui, |ui| self.panel(ui, language));
             });
-    }
-}
-
-fn style(ctx: &Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.override_text_color = Some(TEXT);
-    visuals.panel_fill = BACKGROUND;
-    visuals.window_fill = SURFACE;
-    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, BORDER);
-    visuals.widgets.inactive.bg_fill = Color32::from_rgb(42, 59, 51);
-    visuals.widgets.inactive.weak_bg_fill = SURFACE;
-    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(52, 73, 62);
-    visuals.selection.bg_fill = Color32::from_rgb(46, 91, 64);
-    ctx.set_visuals(visuals);
-    ctx.style_mut(|style| {
-        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
-        style.spacing.interact_size.y = 27.0;
-    });
-}
-
-fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    Frame::new()
-        .fill(SURFACE)
-        .stroke(Stroke::new(1.0_f32, BORDER))
-        .corner_radius(12)
-        .inner_margin(Margin::symmetric(12, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            add(ui);
-        });
-}
-
-fn row(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(title).strong());
-        ui.with_layout(Layout::right_to_left(Align::Center), add);
-    });
-}
-
-fn byte_rate(bytes: u64, language: Language) -> String {
-    if bytes >= 1_048_576 {
-        format!(
-            "{:.1} {}",
-            bytes as f64 / 1_048_576.0,
-            language.text("MiB/s", "МиБ/с")
-        )
-    } else if bytes >= 1024 {
-        format!(
-            "{:.1} {}",
-            bytes as f64 / 1024.0,
-            language.text("KiB/s", "КиБ/с")
-        )
-    } else {
-        format!("{bytes} {}", language.text("B/s", "Б/с"))
     }
 }

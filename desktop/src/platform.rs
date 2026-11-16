@@ -14,6 +14,9 @@ use windows_sys::Win32::Foundation::{
     WPARAM,
 };
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
+use windows_sys::Win32::Graphics::Dwm::{
+    DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+};
 use windows_sys::Win32::Networking::WinInet::*;
 use windows_sys::Win32::System::JobObjects::*;
 use windows_sys::Win32::System::Registry::{
@@ -22,8 +25,8 @@ use windows_sys::Win32::System::Registry::{
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    IsIconic, PostMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow, WM_APP,
-    WM_CLOSE,
+    IsIconic, IsWindowVisible, PostMessageW, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE,
+    SW_SHOW, SetForegroundWindow, ShowWindow, SystemParametersInfoW, WM_APP, WM_CLOSE,
 };
 
 const SHOW_WINDOW: u32 = WM_APP + 1;
@@ -154,6 +157,37 @@ pub fn listen_for_window(commands: WindowCommands, hwnd: isize, quit: impl Fn() 
 pub fn show_window(hwnd: isize) {
     unsafe {
         PostMessageW(hwnd as HWND, SHOW_WINDOW, 0, 0);
+    }
+}
+
+pub fn apply_window_theme(hwnd: isize, background: [u8; 4], text: [u8; 4]) {
+    let color_ref = |[r, g, b, _]: [u8; 4]| u32::from_le_bytes([r, g, b, 0]);
+    for (attribute, value) in [
+        (DWMWA_USE_IMMERSIVE_DARK_MODE, 1),
+        (DWMWA_CAPTION_COLOR, color_ref(background)),
+        (DWMWA_TEXT_COLOR, color_ref(text)),
+    ] {
+        // Older builds of Windows may support only the dark-mode attribute.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd as HWND,
+                attribute as u32,
+                (&raw const value).cast(),
+                size_of::<u32>() as u32,
+            );
+        }
+    }
+}
+
+pub fn animate_window(hwnd: isize) -> bool {
+    let hwnd = hwnd as HWND;
+    let mut enabled = 0_i32;
+    unsafe {
+        IsWindowVisible(hwnd) != 0
+            && IsIconic(hwnd) == 0
+            && SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&raw mut enabled).cast(), 0)
+                != 0
+            && enabled != 0
     }
 }
 
