@@ -3,6 +3,7 @@
 // A proxy someone changed since is left as it is, like the extension does.
 //
 //   gjs -m tools/restore-proxy.js <state.json>
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {SystemProxy} from '../psiphon-tunnel@terentiy/proxy.js';
@@ -13,7 +14,10 @@ try {
     state = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(path)[1]));
 } catch {}
 if (state?.proxy) {
-    print(new SystemProxy().restore(state.proxy) ? 'put back' : 'changed since, left as it is');
+    const restored = new SystemProxy().restore(state.proxy);
+    // Finish writing dconf before dropping the recovery record and exiting.
+    Gio.Settings.sync();
+    print(restored ? 'put back' : 'changed since, left as it is');
     state.proxy = null;
     GLib.file_set_contents(path, JSON.stringify(state));
 }
