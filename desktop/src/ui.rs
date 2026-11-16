@@ -408,6 +408,19 @@ impl Desktop {
         });
         ui.add_space(9.0);
         card(ui, |ui| {
+            if Service::ALL
+                .into_iter()
+                .any(|service| self.state.settings.countries.get(service).is_some())
+            {
+                ui.label(
+                    RichText::new(language.text(
+                        "Country locks apply through the service proxies below.",
+                        "Блокировки работают через прокси сервисов ниже.",
+                    ))
+                    .small()
+                    .color(MUTED),
+                );
+            }
             for (index, service) in Service::ALL.into_iter().enumerate() {
                 if index > 0 {
                     ui.separator();

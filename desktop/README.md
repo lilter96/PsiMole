@@ -32,8 +32,9 @@ In that profile's **Network Settings**, enter the service's address in **Manual
 proxy configuration**, use the same proxy for HTTPS, and keep its domains out of
 the **No proxy for** list.
 
-One tunnel serves both locks. A service can connect after Psiphon reports its
-configured country and two sources confirm the exit IP's country. A disconnect,
+One tunnel serves both locks. Choose the same explicit country under **Exit
+country** as the lock you want to use. A service can connect after Psiphon
+reports that country and two sources confirm the exit IP's country. A disconnect,
 reconnect, or route change closes protected TCP streams. Verification runs on
 route changes and when a lock is first enabled.
 
@@ -50,6 +51,9 @@ Click **Measure speed** while connected to send 8 MB in each direction through
 the regular Psiphon proxy and time both transfers. Compare results across several
 runs on the same network and exit country. The selected Psiphon server, the
 network route, and Psiphon's traffic limits affect the measured throughput.
+The Windows client requests a 2 MiB SSH channel window to improve throughput
+on high-delay links. Psiphon still chooses the server and transport for the
+selected country.
 
 ## Build and test
 

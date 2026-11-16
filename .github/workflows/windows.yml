@@ -41,21 +41,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Restore Cargo build cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
+        id: cargo-cache
         with:
           path: |
             ~/.cargo/registry
             desktop/target
           key: windows-x64-${{ hashFiles('desktop/Cargo.lock') }}
           restore-keys: windows-x64-
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
+      - run: cargo clippy --locked --release --all-targets -- -D warnings
+      - run: cargo test --locked --release
       - name: Check crash recovery of the Windows proxy
-        run: cargo test --locked windows_proxy_recovery_after_crash -- --ignored
-      - name: Download Psiphon, establish an Austrian tunnel and measure throughput
-        if: inputs.live_tunnel
-        run: cargo test --locked live_austrian_tunnel -- --ignored --nocapture
+        run: cargo test --locked --release windows_proxy_recovery_after_crash -- --ignored
       - run: cargo build --locked --release
+      - name: Save Cargo build cache
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            desktop/target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
       - name: Build setup
         run: |
           $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
@@ -67,6 +73,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "NSIS build failed" }
       - name: Install, hide, reopen and uninstall
         run: |
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class DesktopWindow {
+              [DllImport("user32.dll")]
+              public static extern bool IsWindowVisible(IntPtr window);
+              [DllImport("user32.dll", SetLastError = true)]
+              public static extern bool PostMessageW(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
+          }
+          '@
+
           function Wait-For([scriptblock] $Check, [string] $Failure) {
             for ($i = 0; $i -lt 60; $i++) {
               if (& $Check) { return }
@@ -87,16 +104,19 @@ jobs:
           Wait-For { $app.Refresh(); !$app.HasExited -and $app.MainWindowHandle -ne 0 } 'Window failed to open'
           $startupLog = Join-Path $env:LOCALAPPDATA 'PsiMole\startup-error.txt'
           if (Test-Path $startupLog) { throw (Get-Content -Raw $startupLog) }
-          "Opened $($app.MainWindowTitle) at HWND $($app.MainWindowHandle) in process $($app.Id)"
-          if (!$app.CloseMainWindow()) { throw 'Could not send close request' }
+          $window = $app.MainWindowHandle
+          if (![DesktopWindow]::IsWindowVisible($window)) { throw 'Main window started hidden' }
+          if (![DesktopWindow]::PostMessageW($window, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) {
+            throw "Could not send WM_CLOSE ($([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
+          }
           Wait-For {
             $app.Refresh()
             if ($app.HasExited) { throw "Window close exited the process with $($app.ExitCode)" }
-            $app.MainWindowHandle -eq 0
+            ![DesktopWindow]::IsWindowVisible($window)
           } 'Window did not hide to the tray'
           $second = Start-Process -FilePath $exe -PassThru -Wait
           if ($second.ExitCode -ne 0) { throw 'Second launch failed' }
-          Wait-For { $app.Refresh(); !$app.HasExited -and $app.MainWindowHandle -ne 0 } 'Second launch did not restore the same window'
+          Wait-For { !$app.HasExited -and [DesktopWindow]::IsWindowVisible($window) } 'Second launch did not restore the same window'
           $quit = Start-Process -FilePath $exe -ArgumentList '--quit-if-running' -PassThru -Wait
           if ($quit.ExitCode -ne 0 -or !$app.WaitForExit(10000)) { throw 'Quit did not stop the app' }
 
@@ -114,3 +134,6 @@ jobs:
             desktop/PsiMole-Setup-x64.exe
             desktop/PsiMole-Setup-x64.exe.sha256
           if-no-files-found: error
+      - name: Download Psiphon, establish an Austrian tunnel and measure throughput
+        if: inputs.live_tunnel
+        run: cargo test --locked --release live_austrian_tunnel -- --ignored --nocapture

@@ -593,6 +593,8 @@ impl Engine {
         config["LocalHttpProxyPort"] = json!(8081);
         config["LocalSocksProxyPort"] = json!(1081);
         config["TunnelPoolSize"] = json!(1);
+        // Allow up to 2 MiB of in-flight data per SSH channel on high-delay routes.
+        config["SSHChannelWindowSize"] = json!(64);
         config["EmitBytesTransferred"] = json!(true);
         config["SplitTunnelOwnRegion"] = json!(false);
         config["SplitTunnelRegions"] = json!([]);
