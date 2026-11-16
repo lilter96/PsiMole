@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs Psiphon Tunnel: Psiphon's console client in ~/psiphon, the psi,
+# Installs PsiMole: Psiphon's console client in ~/psiphon, the psi,
 # psi-on and psi-off commands in ~/.local/bin, and the GNOME Shell extension.
 # Run it again to update: your Psiphon and your client.conf are kept.
 #
@@ -242,7 +242,7 @@ install_extension() {
     if gnome-extensions enable "$UUID" 2>/dev/null || shell_list add; then
         ok "turned on"
     else
-        warn "could not turn it on: open Extensions and switch on Psiphon Tunnel"
+        warn "could not turn it on: open Extensions and switch on PsiMole"
     fi
     if gsettings get org.gnome.shell disable-user-extensions 2>/dev/null | grep -q true; then
         warn "extensions are switched off as a whole: turn them on at the top of the Extensions app"
@@ -250,7 +250,7 @@ install_extension() {
 }
 
 uninstall() {
-    step "Removing Psiphon Tunnel"
+    step "Removing PsiMole"
     # Turned off, the extension puts the system proxy back as it was.
     gnome-extensions disable "$UUID" >/dev/null 2>&1 || true
     shell_list remove || true

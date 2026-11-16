@@ -1,7 +1,7 @@
 {
   "uuid": "psiphon-tunnel@terentiy",
-  "name": "Psiphon Tunnel",
-  "description": "Psiphon in the top bar. A miner mole shows whether the tunnel is open, through which country, how fast, and who goes through it. Pick the country, point the system proxy at the tunnel, and close it carefully: if programs still use it, it offers to wait until they close.\n\nNeeds Psiphon's console client in ~/psiphon; install.sh from the repository sets it up.",
+  "name": "PsiMole",
+  "description": "Psiphon in your top bar. Pick an exit country, switch on the system proxy, and see which apps use the tunnel. The miner mole can wait for those apps to close before stopping Psiphon.\n\nRun the repository's install.sh to set up PsiMole and the Psiphon console client.",
   "shell-version": [
     "46",
     "47",
@@ -14,6 +14,6 @@
     "user"
   ],
   "settings-schema": "org.gnome.shell.extensions.psiphon-tunnel",
-  "url": "https://github.com/lilter96/gnome-psiphon-tunnel",
+  "url": "https://github.com/lilter96/PsiMole",
   "version": 2
 }

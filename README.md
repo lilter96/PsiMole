@@ -1,46 +1,52 @@
-# Psiphon Tunnel
-
-[![test](https://github.com/lilter96/gnome-psiphon-tunnel/actions/workflows/test.yml/badge.svg)](https://github.com/lilter96/gnome-psiphon-tunnel/actions/workflows/test.yml)
-
-A GNOME Shell extension that puts the [Psiphon](https://github.com/Psiphon-Labs/psiphon-tunnel-core)
-console client in the top bar, with an installer that sets up Psiphon itself
-and a pair of terminal commands. A mole in a miner's helmet digs the tunnel. It
-sleeps while Psiphon is off, digs while Psiphon looks for a server, and stands
-in the open with its lamp on once the tunnel is up. The popup shows the
-server's country, how long the tunnel has held, the latency through it, the
-traffic and the programs that go through it.
-
-Pick the country the tunnel comes out in, point the GNOME system proxy at it
-with one switch, and close it with care: if programs are still using the
-tunnel, it names them and offers to wait until they are gone. The popup speaks
-English or Russian.
-
 <p align="center">
-  <img src="docs/media/demo.webp" width="340" alt="Psiphon finds a server and the mole climbs out with its lamp on. Then the stop button asks what to do about the three programs using the tunnel, and the popup settles on waiting for them to close">
+  <img src="docs/media/psimole.png" width="148" height="148" alt="PsiMole, a mole in a miner’s helmet">
 </p>
 
-![Three moments: the tunnel open with Firefox, Claude Code and Codex going through it; the question before closing it; waiting for them to finish](docs/media/cards.png)
+<h1 align="center">PsiMole</h1>
 
-![The list of countries, and the open tunnel in Russian](docs/media/settings.png)
+<p align="center"><strong>Psiphon for GNOME on Linux</strong></p>
 
-![The top bar item: off, connecting, open, waiting to close, failed](docs/media/panel.png)
+<p align="center">
+  <a href="#quick-start">Install</a> ·
+  <a href="#see-it-in-action">Demo</a> ·
+  <a href="#country-protection-for-claude">Claude country lock</a> ·
+  <a href="README.ru.md">Русский</a> ·
+  <a href="https://github.com/lilter96/PsiMole">Star on GitHub</a>
+</p>
 
-<sub>Rendered at 2× in a throwaway headless GNOME Shell by
-[`tools/media/capture.sh`](tools/media/capture.sh) against a fake Psiphon
-([`tests/fake-psiphon.c`](tests/fake-psiphon.c)). The programs in the list are
-made up.</sub>
+[![Tests](https://github.com/lilter96/PsiMole/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/lilter96/PsiMole/actions/workflows/test.yml)
+
+PsiMole is a GNOME Shell extension for the
+[Psiphon](https://github.com/Psiphon-Labs/psiphon-tunnel-core) proxy. A miner mole
+in your top bar sleeps when the tunnel is off, digs while it connects, and
+switches on its headlamp once you're online.
+
+- **Choose an exit country** and see the current country, uptime, latency and traffic.
+- **Set the GNOME system proxy** in one click to route compatible apps through
+  Psiphon's local HTTP and SOCKS5 proxies.
+- **See who's using the tunnel** and let PsiMole shut it down once those programs close.
+- **Lock Claude to a country** with the optional Rust guard for Claude Code,
+  Claude in Firefox and known Anthropic endpoints. It waits for a verified exit
+  in your chosen country after each reconnect. [Setup and coverage](guard/README.md)
 
 ## Quick start
 
+Use a GNOME Shell 46–51 session on Linux, with Git and `curl` or `wget`.
+The installer downloads Psiphon on x86_64 and runs as your desktop user.
+
 ```sh
-git clone https://github.com/lilter96/gnome-psiphon-tunnel
-cd gnome-psiphon-tunnel
+git clone https://github.com/lilter96/PsiMole.git
+cd PsiMole
 ./install.sh
 ```
 
 Then log out and back in (Wayland, the default), or press Alt+F2, type `r` and
-press Enter (X11). Click the mole in the top bar and turn the tunnel on. From a
-terminal it is `psi-on`.
+press Enter (X11). Click the mole in the top bar and turn the tunnel on. Enable
+**System proxy** in its menu to route apps that follow the GNOME proxy setting.
+From a terminal it is `psi-on`.
+
+<details>
+<summary>Installer options and files</summary>
 
 `install.sh` puts everything in your home directory and needs no root:
 
@@ -69,10 +75,31 @@ command gets a warning.
 | `--no-enable` | install, but leave the extension off |
 | `--uninstall` | remove the extension, the commands and the settings; `~/psiphon` stays |
 
-Needs GNOME Shell 46 to 51, and `curl` or `wget`. Psiphon builds its console client
-for x86_64 only. On another machine, build
+To use another CPU architecture, build
 [psiphon-tunnel-core](https://github.com/Psiphon-Labs/psiphon-tunnel-core) (Go),
 put it at `~/psiphon/psiphon` and run `./install.sh` again.
+
+</details>
+
+## See it in action
+
+<p align="center">
+  <img src="docs/media/demo.webp" width="340" alt="The mole digs as Psiphon connects. After you ask to stop, PsiMole waits for the apps on the tunnel to close.">
+</p>
+
+![PsiMole shows Firefox, Claude Code and Codex on the tunnel, asks before closing it, and waits for those apps to exit](docs/media/cards.png)
+
+<details>
+<summary>Country picker, Russian interface and top bar states</summary>
+
+![The Psiphon country picker and the open tunnel in Russian](docs/media/settings.png)
+
+![The top bar mole when the tunnel is off, connecting, open, waiting to close or failed](docs/media/panel.png)
+
+</details>
+
+These demos use simulated traffic in an isolated GNOME Shell. To reproduce
+them, use [`tools/media/capture.sh`](tools/media/capture.sh).
 
 ## In a terminal
 
@@ -116,10 +143,14 @@ does the same from a terminal.
 ## Country protection for Claude
 
 The optional [country guard](guard/README.md) adds a **Claude** row to the mole's
-menu. Pick the country allowed for Claude there. The **Country** row still
-selects where Psiphon connects. The two choices need to match for Claude to
-work. The guard applies to the web app, Claude Code and local apps that use the
-same Anthropic destinations.
+menu. Set the country Claude is allowed to use there, then select the same exit
+in **Country**. Once the guard verifies the exit IP, Claude can connect. The guard
+closes protected connections when Psiphon loses the approved tunnel. You can
+choose Austria, Germany, or any supported Psiphon exit for the lock.
+
+The guard is documented for Ubuntu and uses firewall and DNS policy for one
+desktop account. Follow the [installation and coverage guide](guard/README.md)
+before enabling it.
 
 ## The system proxy
 
@@ -268,6 +299,8 @@ process of your real session.
 
 ## Limitations
 
+- The standard setup routes apps that use the configured local proxy. It is an
+  unofficial Psiphon companion.
 - The paths are fixed: `~/psiphon/{psiphon,client.conf,psiphon.log,psiphon.pid}`.
 - GNOME Shell 46 to 51. Made on 46 under X11; every push runs the whole
   cycle, the settings window included, in the headless Shell of Ubuntu 24.04
@@ -281,6 +314,11 @@ process of your real session.
 A sibling of [gnome-dota-time](https://github.com/lilter96/gnome-dota-time) and
 [gnome-headphones-battery](https://github.com/lilter96/gnome-headphones-battery):
 the same spring animation and the same approach to a character.
+
+## Feedback
+
+Found a problem or tried PsiMole on another distribution? [Open an issue](https://github.com/lilter96/PsiMole/issues/new)
+with your distribution, GNOME Shell version and what you saw.
 
 ## License
 
